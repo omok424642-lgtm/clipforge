@@ -56,3 +56,6 @@ next-env.d.ts
 /task_plan.md
 /findings.md
 /progress.md
+
+# Windows personal launcher: local install state and diagnostic logs
+/.clipforge-launcher/

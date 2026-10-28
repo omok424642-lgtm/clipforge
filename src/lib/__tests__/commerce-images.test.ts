@@ -63,3 +63,27 @@ describe("source/review persistence", () => {
     await expect(readCommerceDraft("../../private")).rejects.toThrow();
   });
 });
+
+describe('checked image destinations', () => {
+  it('unwraps the public image wrapper before making any request', async () => {
+    const input=await source(); input.images[0].url='https://search.pstatic.net/common?src='+encodeURIComponent('https://shop-phinf.pstatic.net/a.png?type=w860');
+    const request=vi.fn(async(url: string, init?: RequestInit)=>{ expect(url).toContain('shop-phinf.pstatic.net'); expect(init?.redirect).toBe('manual'); return new Response(png,{headers:{'content-type':'image/png'}}); });
+    const result=await retainCommerceImages(input,request);
+    expect(request.mock.calls[0][0]).toBe('https://shop-phinf.pstatic.net/a.png?type=w860'); expect(result.images).toHaveLength(1);
+  });
+  it('allows at most two validated CDN redirects and sends no credentials', async () => {
+    const request=vi.fn(async(_url:string,init?:RequestInit)=>{
+      expect(init?.redirect).toBe('manual'); expect(JSON.stringify(init)).not.toMatch(/cookie|authorization/i);
+      return request.mock.calls.length<3 ? new Response(null,{status:302,headers:{location:request.mock.calls.length===1?'https://shopping-phinf.pstatic.net/b.png?type=w860':'/c.png'}}) : new Response(png,{headers:{'content-type':'image/png'}});
+    });
+    const result=await retainCommerceImages(await source(),request); expect(result.images).toHaveLength(1); expect(request).toHaveBeenCalledTimes(3);
+  });
+  it.each(['http://shop-phinf.pstatic.net/a.png','https://127.0.0.1/a.png','https://shop-phinf.pstatic.net/a.png?auth=secret'])('does not request an unsafe redirect: %s', async location => {
+    const request=vi.fn(async()=>new Response(null,{status:302,headers:{location}})); const result=await retainCommerceImages(await source(),request);
+    expect(request).toHaveBeenCalledTimes(1);expect(result.images).toEqual([]);
+  });
+  it('stops redirect loops', async()=>{
+    const request=vi.fn(async()=>new Response(null,{status:302,headers:{location:'https://shop-phinf.pstatic.net/a.png'}}));
+    expect((await retainCommerceImages(await source(),request)).images).toEqual([]);expect(request).toHaveBeenCalledTimes(3);
+  });
+});

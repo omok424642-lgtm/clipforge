@@ -1,3 +1,4 @@
+import { commerceImageAddress } from "./commerce-image-address";
 import { mkdir, writeFile, stat, readFile } from "fs/promises";
 import { join } from "path";
 import { createHash } from "crypto";
@@ -38,8 +39,19 @@ export async function retainCommerceImages(draft: CommerceProductDraft, request 
       result.warnings.push("플랫폼 공식 이미지 호스트로 확인되지 않은 이미지는 저장하지 않았습니다. 사용 가능한 이미지를 직접 업로드해 주세요."); continue;
     }
     try {
-      // Redirects are refused: no login, hotlink or access-control workaround.
-      const res = await request(img.url, { headers: { "User-Agent": "ClipForgeProductImport/1.0", Accept: "image/*" } });
+      // Every hop stays on the fixed image CDN policy. Never send cookies/auth or visit arbitrary wrappers.
+      let target = commerceImageAddress(img.url, draft.link.platform).url;
+      let res: Response;
+      for (let hop = 0; ; hop++) {
+        res = await request(target, { redirect: 'manual', headers: { 'User-Agent': 'ClipForgeProductImport/1.0', Accept: 'image/*' } });
+        if (res.redirected) throw new Error('검증되지 않은 자동 리다이렉트');
+        if (![301,302,303,307,308].includes(res.status)) break;
+        const location = res.headers.get('location');
+        await res.body?.cancel();
+        if (!location || hop >= 2) throw new Error('리다이렉트 제한');
+        target = commerceImageAddress(new URL(location, target).href, draft.link.platform).url;
+        if (!target) throw new Error('허용되지 않은 리다이렉트');
+      }
       if (!res.ok || res.status >= 300) throw new Error("다운로드 제한");
       const bytes = await readBounded(res, 12 * 1024 * 1024);
       const ext = imageExtension(bytes, (res.headers.get("content-type") || "").split(";")[0].trim().toLowerCase());

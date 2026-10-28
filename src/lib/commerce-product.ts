@@ -1,3 +1,4 @@
+import { commerceImageAddress } from "./commerce-image-address";
 /** Shared, client-safe contract for reviewed Korean commerce imports. No video side effects. */
 export type CommercePlatform = "naver" | "coupang";
 export type CollectionMethod = "naver_search_api" | "coupang_partners_api" | "public_metadata" | "manual" | "browser_page";
@@ -92,11 +93,5 @@ export function missingCommerceFields(draft: Pick<CommerceProductDraft, "title" 
 }
 
 export function allowedCommerceImage(url: string, platform: CommercePlatform) {
-  try {
-    const u = new URL(url);
-    if (u.protocol !== "https:" || u.username || u.password || u.port) return false;
-    return platform === "naver"
-      ? /^(?:shopping-phinf|shop-phinf)\.pstatic\.net$/.test(u.hostname)
-      : /^(?:image|thumbnail(?:\d+)?)\.coupangcdn\.com$/.test(u.hostname);
-  } catch { return false; }
+  return !!commerceImageAddress(url, platform).url;
 }

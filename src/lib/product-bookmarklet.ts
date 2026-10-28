@@ -1,8 +1,10 @@
-export const PRODUCT_BOOKMARKLET_VERSION = "2026-10-28.4";
+import { commerceImageAddress } from "./commerce-image-address";
+
+export const PRODUCT_BOOKMARKLET_VERSION = "2026-10-28.5";
 
 /** Self-contained: stringified into a bookmark. No requests, private state or frame traversal. */
-export function collectRenderedProductPage() {
-  const version = "2026-10-28.4";
+export function collectRenderedProductPage(addressPolicy = commerceImageAddress) {
+  const version = "2026-10-28.5";
   const h = location.hostname;
   const naver = /^(?:m\.)?smartstore\.naver\.com$|^brand\.naver\.com$/.test(h) && /^\/[^/]+\/products\/\d+\/?$/.test(location.pathname);
   const coupang = /^(?:www\.|m\.)?coupang\.com$/.test(h) && /^\/(?:vp|vm)\/products\/\d+\/?$/.test(location.pathname);
@@ -79,11 +81,7 @@ export function collectRenderedProductPage() {
   };
   const imageUrl = (e: Element, screen = true) => {
     if (!(e instanceof HTMLImageElement) || !(screen ? onScreen(e) : rendered(e)) || !e.complete || e.naturalWidth <= 0) return "";
-    try {
-      const u = new URL(e.currentSrc || e.src);
-      const allowed = naver ? /^(?:shopping-phinf|shop-phinf)\.pstatic\.net$/.test(u.hostname) : /^(?:image|thumbnail\d*)\.coupangcdn\.com$/.test(u.hostname);
-      return allowed && u.protocol === "https:" && !u.username && !u.password && !u.port && !u.hash && ![...u.searchParams.keys()].some(k => /token|auth|session|password|credential|signature/i.test(k)) ? u.href : "";
-    } catch { return ""; }
+    return addressPolicy(e.currentSrc || e.src, naver ? 'naver' : 'coupang').url;
   };
   const imageKey = (raw: string) => { const u = new URL(raw); for (const p of ["type", "w", "h", "width", "height", "quality", "q"]) u.searchParams.delete(p); return u.href; };
   const dedupImages = (urls: string[]) => { const seen = new Set<string>(); return urls.filter(u => { const k = imageKey(u); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 10); };
@@ -202,8 +200,32 @@ export function collectRenderedProductPage() {
     }
     return [...new Set(result)];
   }
+  const reviewDate = (e: Element) => /^(?:\d{2}|\d{4})[.\/-]\s*\d{1,2}[.\/-]\s*\d{1,2}\.?$/.test(text(e, 30));
+  const sortMarker = (e: Element) => displayed(e) && /^(?:최신순|추천순|랭킹순|평점.*순|리뷰\s*정렬)$/.test(clean((e as HTMLElement).innerText || '') + (e.getAttribute('aria-label') || ''));
+  const ratedCard = (e: Element) => !!Array.from(e.querySelectorAll('time,span')).find(reviewDate) && !!Array.from(e.querySelectorAll('[aria-label*="평점"],[itemprop="ratingValue"]')).find(rendered) && !!Array.from(e.querySelectorAll('p,[itemprop="reviewBody"],[data-review-content]')).find(p => onScreen(p) && text(p, 200).length >= 20);
+  function adjacentAreas(kind: 'detail' | 'review') {
+    const candidates = new Set<Element>();
+    for (const control of query(['button','[role="tab"]']).filter(e => displayed(e) && areaKind(e) === kind && !foreignProduct(e))) {
+      // Inspect sibling content, never infer an open state from CSS/aria-selected alone.
+      for (let p = control.parentElement, depth = 0; p && !/^(BODY|HTML)$/.test(p.tagName) && depth < 4; p = p.parentElement, depth++) {
+        for (const sibling of Array.from(p.parentElement?.children || []).slice(0, 80)) {
+          if (sibling === p || sibling.contains(control) || /^(BODY|HTML|NAV|ASIDE|FOOTER)$/.test(sibling.tagName) || !rendered(sibling) || foreignProduct(sibling)) continue;
+          if (sibling.querySelector('h1,[itemprop="offers"],input[type="password"],textarea,[contenteditable="true"]') || Array.from(sibling.querySelectorAll('a[href]')).some(foreignProduct)) continue;
+          const review = Array.from(sibling.querySelectorAll('article,li,[role="listitem"]')).some(ratedCard);
+          const sorting = Array.from(sibling.querySelectorAll('button,a,select,[role="button"]')).some(sortMarker);
+          if (kind === 'review' && review && sorting) candidates.add(sibling);
+          const specKeys = Array.from(sibling.querySelectorAll('th,dt')).filter(e => /^(브랜드|제조사|모델명|품명 및 모델명|소재|재질|용량|크기|제조국)$/.test(text(e, 40)));
+          const description = Array.from(sibling.querySelectorAll('[itemprop="description"]')).some(e => onScreen(e) && text(e, 200).length >= 20);
+          if (kind === 'detail' && !review && !sorting && (specKeys.length >= 2 || description)) candidates.add(sibling);
+        }
+      }
+    }
+    // Nested proofs are the same region; competing independent regions remain unconfirmed.
+    const smallest = [...candidates].filter(e => ![...candidates].some(other => other !== e && e.contains(other)));
+    return smallest.length === 1 ? smallest : [];
+  }
   function reviewScopes() {
-    const scopes: Element[] = linkedAreas('review');
+    const scopes: Element[] = [...linkedAreas('review'), ...adjacentAreas('review')];
     for (const tab of query(['[role="tab"][aria-selected="true"]','[aria-selected="true"][aria-controls]'])) {
       if (!displayed(tab) || foreignProduct(tab) || !/^(리뷰|구매평|상품평)/.test(clean((tab as HTMLElement).innerText || ''))) continue;
       const id = tab.getAttribute('aria-controls'), pane = id && document.getElementById(id);
@@ -228,9 +250,9 @@ export function collectRenderedProductPage() {
   function productSummary(scope: Element | null) {
     const ratings = new Set<string>(), reviewCounts = new Set<string>();
     const roots = scope ? [scope] : [];
-    const nodes = [...roots.flatMap(r => Array.from(r.querySelectorAll('span,strong,p,a,button,dt,dd,div'))), ...query(['[role="tab"]'])];
+    const nodes = [...roots.flatMap(r => Array.from(r.querySelectorAll('span,strong,p,a,button,dt,dd,div'))), ...query(['[role="tab"]', 'button']).filter(e => areaKind(e) === 'review')];
     for (const e of nodes) {
-      const tab = e.getAttribute('role') === 'tab';
+      const tab = e.getAttribute('role') === 'tab' || (e.tagName === 'BUTTON' && areaKind(e) === 'review');
       if (!(tab ? displayed(e) : rendered(e)) || foreignProduct(e) || e.closest('[itemprop="review"],article[data-review], [data-review-content]') || e.querySelector('textarea,[contenteditable="true"]')) continue;
       const t = clean(((e as HTMLElement).innerText || '') + ' ' + (e.getAttribute('aria-label') || '')); if (t.length > 160 || /리뷰\s*작성|적립|포인트|혜택/.test(t)) continue;
       const r = t.match(/(?:총\s*)?평점\s*[:：]?\s*([0-5](?:\.\d{1,2})?)(?:\s*점|\s*\/\s*5|\s|$)/);
@@ -269,7 +291,7 @@ export function collectRenderedProductPage() {
       try { const a = new URL(imageMeta, location.href), b = new URL((e as HTMLImageElement).currentSrc || (e as HTMLImageElement).src); return a.hostname === b.hostname && a.pathname === b.pathname; } catch { return false; }
     }) : [];
     let images = dedupImages([...query(adapter.images), ...matchingImages].map(e => imageUrl(e)).filter(Boolean));
-    const detailRoots = [...new Set([...query(adapter.details).filter(rendered), ...linkedAreas('detail')])];
+    const detailRoots = [...new Set([...query(adapter.details).filter(rendered), ...linkedAreas('detail'), ...adjacentAreas('detail')])];
     // An explicitly labelled detail tab is also a product scope; no arbitrary body text fallback.
     for (const pane of query(['[role="tabpanel"][aria-labelledby]'])) {
       const label = document.getElementById(pane.getAttribute("aria-labelledby") || "");
@@ -312,7 +334,7 @@ export function collectRenderedProductPage() {
     for (const table of tables) {
       const rows = Array.from(table.querySelectorAll('tr')).filter(rendered);
       const hasId = rows.some(row => { const cells = Array.from(row.querySelectorAll('th,td')); return cells.some((c, i) => text(c) === "상품번호" && text(cells[i + 1] || c) === location.pathname.split('/').filter(Boolean).pop()); });
-      const scoped = query(adapter.specs).includes(table);
+      const scoped = query(adapter.specs).includes(table) || detailRoots.some(r => r.contains(table));
       if (!hasId && !scoped) continue;
       for (const row of rows) {
         const cells = Array.from(row.querySelectorAll('th,td'));
@@ -326,7 +348,7 @@ export function collectRenderedProductPage() {
     if (coupang) specs.push(...many(['.prod-attr-item']));
     const structuredBodies: string[] = [];
     for (const pane of reviewRoots) for (const card of Array.from(pane.querySelectorAll('article,li,[role="listitem"]')).slice(0, 60)) {
-      const dates = Array.from(card.querySelectorAll('time,span')).filter(e => rendered(e) && /^\d{4}[.\/-]\s*\d{1,2}[.\/-]\s*\d{1,2}\.?$/.test(text(e, 30)));
+      const dates = Array.from(card.querySelectorAll('time,span')).filter(e => rendered(e) && reviewDate(e));
       const rated = Array.from(card.querySelectorAll('[aria-label*="평점"],[itemprop="ratingValue"]')).some(rendered);
       if (!dates.length || !rated) continue;
       for (const p of Array.from(card.querySelectorAll('p')).filter(onScreen)) {
@@ -341,8 +363,33 @@ export function collectRenderedProductPage() {
     const frames = query(['iframe']).filter(onScreen);
     const readableFrames = frames.filter(e => { try { return !!(e as HTMLIFrameElement).contentDocument; } catch { return false; } }).length;
     const structureTag = (e: Element) => /^(DIV|SECTION|ARTICLE|MAIN|UL|OL|LI|FIGURE|PICTURE|A|BUTTON|SPAN|P|H[1-6]|NAV|IMG|BODY|HTML)$/.test(e.tagName) ? e.tagName : 'OTHER';
+    const semanticClasses = ['se-main-container','se-component','se-image','se-text','product-detail','review','review-content','active','selected','on'];
+    const nodes: { node: number; parent: number; tag: string; role: string; itemprop: string; classes: string[]; classCount: number; displayed: boolean; onScreen: boolean; images: number; paragraphs: number; dates: number; ratings: number; sorters: number; foreignLinks: number }[] = [];
+    const nodeIds = new Map<Element, number>();
+    const nodeId = (e: Element | null): number => { if (!e) return 0; if (!nodeIds.has(e)) nodeIds.set(e, nodeIds.size + 1); return nodeIds.get(e)!; };
+    const profile = (e: Element) => {
+      const id = nodeId(e); if (nodes.some(n => n.node === id) || nodes.length >= 160) return id;
+      const children = Array.from(e.querySelectorAll('time,span')).slice(0, 500);
+      nodes.push({ node: id, parent: nodeId(e.parentElement), tag: structureTag(e), role: ['tab','tabpanel','tablist','button','list','listitem','heading','main'].includes(e.getAttribute('role') || '') ? e.getAttribute('role')! : 'other', itemprop: ['description','review','reviewBody','ratingValue','aggregateRating','image'].includes(e.getAttribute('itemprop') || '') ? e.getAttribute('itemprop')! : 'other', classes: Array.from(e.classList).filter(c => semanticClasses.includes(c)).slice(0, 10), classCount: Math.min(e.classList.length, 100), displayed: displayed(e), onScreen: onScreen(e), images: Math.min(e.querySelectorAll('img').length,1000), paragraphs: Math.min(e.querySelectorAll('p,[itemprop="reviewBody"],[data-review-content]').length,1000), dates: children.filter(reviewDate).length, ratings: Math.min(e.querySelectorAll('[aria-label*="평점"],[itemprop="ratingValue"]').length,1000), sorters: Array.from(e.querySelectorAll('button,a,select,[role="button"]')).slice(0,500).filter(sortMarker).length, foreignLinks: Array.from(e.querySelectorAll('a[href]')).slice(0,500).filter(foreignProduct).length });
+      return id;
+    };
+    const neighborhood = query(['button','[role="tab"]','a[href]']).filter(e => displayed(e) && areaKind(e)).slice(0,12).map(e => {
+      const context: { node: number; relation: string; depth: number }[] = [];
+      for (let p = e.parentElement, depth = 0; p && depth < 4 && !/^(BODY|HTML)$/.test(p.tagName); p = p.parentElement, depth++) {
+        context.push({ node: profile(p), relation: 'ancestor', depth });
+        const siblings = Array.from(p.parentElement?.children || []); const at = siblings.indexOf(p);
+        for (const sibling of siblings.slice(Math.max(0,at-1),at+5)) if (sibling !== p) context.push({node: profile(sibling), relation: siblings.indexOf(sibling) < at ? 'before' : 'after', depth});
+      }
+      return { node: profile(e), kind: areaKind(e), selected: e.hasAttribute('aria-selected') ? e.getAttribute('aria-selected') === 'true' ? 'true' : 'false' : 'absent', expanded: e.hasAttribute('aria-expanded') ? e.getAttribute('aria-expanded') === 'true' ? 'true' : 'false' : 'absent', context: context.slice(0,24) };
+    });
+    const structureEvidence = {
+      imageChecks: allScreenImages.slice(0,24).map(e => {
+        const img = e as HTMLImageElement, check = addressPolicy(img.currentSrc || img.src, naver ? 'naver' : 'coupang');
+        return { node: profile(e), reason: check.reason, host: check.host, query: check.query, sourceSet: !!img.srcset, sourceDiffers: !!img.currentSrc && img.currentSrc !== img.src, ancestors: Array.from((function*(){ for(let p = e.parentElement, i=0; p && i<7; p=p.parentElement,i++) yield p; })()).map(profile) };
+      }), nodes, neighborhood,
+    };
     const structure = {
-      version: 1,
+      evidence: structureEvidence, version: 1,
       images: allScreenImages.slice(0, 24).map(img => {
         const ancestors = []; let node: Element | null = img.parentElement;
         for (let depth = 0; node && depth < 7; depth++, node = node.parentElement) ancestors.push({ tag: structureTag(node), images: Math.min(node.querySelectorAll('img').length, 1000), headings: Math.min(node.querySelectorAll('h1,h2,h3,h4,[role="heading"]').length, 1000), detail: detailRoots.some(r => r === node || r.contains(node!)), review: reviewRoots.some(r => r === node || r.contains(node!)) });
@@ -360,7 +407,7 @@ export function collectRenderedProductPage() {
     const diagnostics = {
       structure, automaticAssessmentRecorded: true, collectorVersion: version, platform: naver ? "naver" : "coupang", productId: location.pathname.split('/').filter(Boolean).pop() || "",
       pageState: document.readyState, topFrame: window.top === window, metadataIdentity: identity, blockedPage: blocked,
-      counts: { metadataTags: query(['head meta[property^="og:"]', 'head meta[property^="product:"]']).length, titleMatches: query(adapter.title).length, priceMatches: query(adapter.price).length, detailRoots: detailRoots.length, reviewMatches: query(adapter.reviews).length, visibleReviews: reviews.length, visibleImages: allScreenImages.length, productImages: images.length, frames: frames.length, readableFrames, headingCandidates: 0, purchaseControls: 0, productRegions: 0, ambiguousRegions: 0, moneyCandidates: 0, excludedBenefitPrices: 0, ambiguousPrices: 0, supportedVisibleImages: 0, imageHostRejected: 0, imageScopeRejected: 0, primaryImages: 0, additionalImages: 0, detailImages: 0, reviewTabOpen: 0, autoTitle: 0, autoPrice: 0, autoPrimaryImage: 0, rawHeadingElements: 0, visibleCurrencyNodes: 0 },
+      counts: { metadataTags: query(['head meta[property^="og:"]', 'head meta[property^="product:"]']).length, titleMatches: query(adapter.title).length, priceMatches: query(adapter.price).length, detailRoots: detailRoots.length, reviewMatches: new Set([...query(adapter.reviews).filter(e => reviewRoots.some(r => r.contains(e)) && onScreen(e)).map(e => text(e, 1500)), ...structuredBodies].filter(Boolean)).size, visibleReviews: reviews.length, visibleImages: allScreenImages.length, productImages: images.length, frames: frames.length, readableFrames, headingCandidates: 0, purchaseControls: 0, productRegions: 0, ambiguousRegions: 0, moneyCandidates: 0, excludedBenefitPrices: 0, ambiguousPrices: 0, supportedVisibleImages: 0, imageHostRejected: 0, imageScopeRejected: 0, primaryImages: 0, additionalImages: 0, detailImages: 0, reviewTabOpen: 0, autoTitle: 0, autoPrice: 0, autoPrimaryImage: 0, rawHeadingElements: 0, visibleCurrencyNodes: 0 },
       fields: [] as { name: Field; method: Method; path: Path; confidence: Confidence }[],
     };
     const data = {
@@ -368,7 +415,7 @@ export function collectRenderedProductPage() {
       title: set("title", name || (!generic.test(ogTitle) ? ogTitle : ""), name ? "visible_dom" : "public_metadata", region ? "product_region" : name ? "caption_heading" : "metadata", region?.corroborated ? "corroborated" : "candidate") as string,
       price: set("price", priceDom || priceMeta, priceDom ? "visible_dom" : "public_metadata", region ? "sale_price" : priceDom ? "legacy_selector" : "metadata", region?.price.labelled ? "corroborated" : "candidate") as string,
       brand: set("brand", brand || (usableMeta ? clean(meta("product:brand")).slice(0, 300) : ""), brand ? "visible_dom" : "public_metadata") as string, options: set("options", options, "visible_dom", "selected_control", "corroborated") as string[],
-      description: set("description", description, "visible_dom") as string,
+      description: set("description", description, "visible_dom", "product_region", "candidate") as string,
       specifications: set("specifications", [...new Set(specs)].slice(0, 30), "visible_dom") as string[],
       images: set("images", images, "visible_dom") as string[], reviews: set("reviews", reviews, "visible_dom", "review_tab", "candidate") as string[], rating: set("rating", aggregate.rating || first(naver ? ['[itemprop="aggregateRating"] [itemprop="ratingValue"]'] : adapter.rating, 100), "visible_dom", "product_summary", "candidate") as string,
       reviewCount: set("reviewCount", aggregate.reviewCount, "visible_dom", "product_summary", "candidate") as string,
@@ -435,6 +482,7 @@ export function collectRenderedProductPage() {
     lines.push("문서 complete도 동적 상품 영역의 준비 완료를 보장하지 않습니다. 상품이 보인 후 다시 읽으세요.");
     lines.push(`자동 추출 당시(직접 선택 제외): 상품명 ${c.autoTitle ? '찾음' : '미확인'}, 가격 ${c.autoPrice ? '찾음' : '미확인'}, 대표 이미지 ${c.autoPrimaryImage ? '찾음' : '미확인'}`);
     lines.push(`표시 제목 요소 ${c.rawHeadingElements}, 통화 표시 요소 ${c.visibleCurrencyNodes}. 제목 후보 ${c.headingCandidates}, 구매 버튼 ${c.purchaseControls}, 상품 영역 ${c.productRegions}, 영역 충돌 ${c.ambiguousRegions}, 판매가 후보 ${c.moneyCandidates}, 혜택 금액 제외 ${c.excludedBenefitPrices}`);
+    lines.push("이미지 호스트 제외 수는 과거 호환용 합계입니다. 새 진단의 imageChecks.reason에서 호스트·프로토콜·쿼리·주소 형식을 구분합니다. currentSrc만으로 실제 리다이렉트 이력을 확인할 수 없습니다.");
     lines.push(`구조 진단: 이미지 조상 ${d.structure.images.length}개 / 상세·리뷰 표지 ${d.structure.controls.length}개. 텍스트·클래스명·주소·작성자 정보는 저장하지 않습니다.`);
     lines.push(`대표 ${c.primaryImages} / 추가 ${c.additionalImages} / 상세 ${c.detailImages}, 이미지 호스트 제외 ${c.imageHostRejected} / 상품 범위 제외 ${c.imageScopeRejected}. 리뷰 탭 ${c.reviewTabOpen ? '열림 단서 있음' : '열림 미확인'}. 리뷰 수와 본문 수는 별개입니다.`);
     if (c.ambiguousRegions || c.ambiguousPrices) lines.push('여러 상품 영역 또는 판매가 후보가 충돌해 자동 확정하지 않았습니다. 단일 상품 화면과 진단을 확인하세요.');
@@ -528,5 +576,5 @@ export function collectRenderedProductPage() {
 }
 
 export function productBookmarklet(): string {
-  return `javascript:void(${encodeURIComponent(`(${collectRenderedProductPage.toString()})()`)})`;
+  return `javascript:void(${encodeURIComponent(`(${collectRenderedProductPage.toString()})(${commerceImageAddress.toString()})`)})`;
 }

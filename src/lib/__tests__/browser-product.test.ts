@@ -1,3 +1,4 @@
+import { commerceImageAddress } from "../commerce-image-address";
 import { describe, expect, it, vi } from "vitest";
 // @ts-expect-error The existing jsdom test runtime is installed without @types/jsdom.
 import { JSDOM } from "jsdom";
@@ -54,7 +55,7 @@ function page(url: string, html: string) {
   const fetch = vi.fn(); Object.assign(w, { fetch });
   Object.defineProperty(w, "__PRELOADED_STATE__", { get() { throw new Error("Private state must not be read"); } });
   Object.defineProperty(w.document, "cookie", { get() { throw new Error("Cookies must not be read"); } });
-  w.eval(`(${collectRenderedProductPage.toString()})()`);
+  w.eval(`(${collectRenderedProductPage.toString()})(${commerceImageAddress.toString()})`);
   return { dom, w, fetch, root: w.document.getElementById("clipforge-product-import")?.shadowRoot as ShadowRoot | undefined };
 }
 
@@ -203,7 +204,7 @@ describe("diagnosing unsupported live-page structures without private state", ()
     const p = page(liveUrl, publicHead);
     const safe = parseBrowserDiagnostics({ ...snapshot(p).diagnostics, html: '<div>개인정보</div>', cookie: 'secret', sourceUrl: 'https://private/token', counts: { ...snapshot(p).diagnostics.counts, private: 'secret', frames: -5 } });
     expect(JSON.stringify(safe)).not.toMatch(/개인정보|secret|private|token/); expect(safe!.counts.frames).toBe(0);
-    const material = parseBrowserProduct(snapshot(p)); expect(material.diagnostics!.collectorVersion).toBe('2026-10-28.4');
+    const material = parseBrowserProduct(snapshot(p)); expect(material.diagnostics!.collectorVersion).toBe('2026-10-28.5');
     expect(parseBrowserDiagnostics({ collectorVersion: 'injected-private-text' })).toBeUndefined(); p.dom.window.close();
   });
   it("does not attach diagnostics from a different product to a material snapshot", () => {
@@ -338,7 +339,7 @@ describe('brandstore material scope relationships (synthetic, not live validatio
     expect(s.description).toContain('공개 상품 설명'); expect(s.reviews).toEqual([body]);
     expect(s.diagnostics.counts.reviewTabOpen).toBe(1);
     expect(s.images.join(' ')).not.toMatch(/customer|ad.jpg/);
-    expect(JSON.stringify(s.diagnostics)).not.toMatch(/작성자|소재|편했습니다|https:|spec-pane|feedback-pane|shop-phinf/);
+    expect(JSON.stringify(s.diagnostics)).not.toMatch(/작성자|소재|편했습니다|https:|spec-pane|feedback-pane|detail-long\.jpg/);
     expect(p.fetch).not.toHaveBeenCalled(); p.dom.window.close();
   });
   it('never treats hidden panels, other-page fragments or a link wrapping the whole page as material scopes', () => {
@@ -358,5 +359,43 @@ describe('brandstore material scope relationships (synthetic, not live validatio
     expect(value.structure!.images).toHaveLength(24); expect(value.structure!.images[0].ancestors).toHaveLength(7); expect(value.structure!.images[0].ancestors[0]).toEqual({tag:'OTHER',images:1000,headings:0,detail:false,review:false}); expect(JSON.stringify(value)).not.toMatch(/secret|private-user-name|private-id|unresolved/);
     expect(parseBrowserDiagnostics({...s.diagnostics,structure:{version:22}})!.structure).toBeUndefined();
     p.dom.window.close();
+  });
+});
+
+describe('unlinked brandstore buttons and redacted structural evidence', () => {
+  const url='https://brand.naver.com/fixture/products/667788';
+  const reviewBody='평일에 실제로 사용해 보니 손잡이를 잡기 편했고 세척 과정도 간편했습니다.';
+  const reviewPane=`<div class="opaque-private"><button>랭킹순</button><ul><li><span class="author">작성자_외부전송금지</span><time>26.10.20</time><span aria-label="평점 4점"></span><p>${reviewBody}</p><img src="https://shop-phinf.pstatic.net/customer.jpg" data-width="600" data-height="400"></li></ul></div>`;
+  const tabs='<div><ul><li><button>상품정보</button></li><li><button>리뷰(62)</button></li></ul></div>';
+  it('recognizes displayed sibling specifications and dated/rated review cards even without tab attributes', () => {
+    const p=page(url,automaticFixture()+`<div>${tabs}<div><table><tr><th>소재</th><td>스테인리스</td></tr><tr><th>용량</th><td>450ml</td></tr></table><img src="https://shop-phinf.pstatic.net/detail.jpg"></div>${reviewPane}</div>`);
+    const s=snapshot(p);expect(s.title).toBe('테스트 무선 전기포트');expect(s.price).toBe('53,700원');expect(s.diagnostics.counts.autoPrimaryImage).toBe(1);
+    expect(s.diagnostics.counts.detailRoots).toBe(1);expect(s.diagnostics.counts.reviewTabOpen).toBe(1);expect(s.reviews).toEqual([reviewBody]);expect(s.images.join()).not.toContain('customer');expect(s.imageAssets.some((a:{role:string})=>a.role==='detail')).toBe(true);
+    expect(s.reviewCount).toBe(''); // Conflicting 62 vs 1,278 must not be silently merged.
+    const d=JSON.stringify(s.diagnostics);expect(d).not.toMatch(/작성자|외부전송|opaque-private|https:|스테인리스|손잡이/);
+    expect(s.diagnostics.structure.evidence.neighborhood.some((n:{selected:string})=>n.selected==='absent')).toBe(true);
+    expect(p.fetch).not.toHaveBeenCalled();p.dom.window.close();
+  });
+  it('does not use a button, selected CSS class, image or summary alone as proof that reviews are open',()=>{
+    const p=page(url,automaticFixture()+`<div>${tabs}<div class="selected"><p>평점 4.90점 리뷰 62건</p><img src="https://shop-phinf.pstatic.net/unresolved.jpg"></div><div hidden>${reviewPane}</div></div>`);
+    const s=snapshot(p);expect(s.reviews).toEqual([]);expect(s.diagnostics.counts.reviewTabOpen).toBe(0);expect(s.diagnostics.counts.detailRoots).toBe(0);expect(s.images.join()).not.toContain('unresolved');p.dom.window.close();
+  });
+  it('records safe URL rejection reasons, semantic class tokens and anonymous relationships without raw attributes',()=>{
+    const p=page(url,automaticFixture()+`<div class="se-main-container private-user-name" data-secret="auth-value">${tabs}<div><img src="https://phinf.pstatic.net/checkout/private-path.jpg?type=w860"><img src="https://shop-phinf.pstatic.net/a.jpg?token=private-token"></div></div>`);
+    const s=snapshot(p), evidence=s.diagnostics.structure.evidence;
+    expect(evidence.imageChecks.some((v:{host:string;reason:string})=>v.host==='phinf.pstatic.net'&&v.reason==='host')).toBe(true);
+    expect(evidence.imageChecks.some((v:{reason:string})=>v.reason==='sensitive_query')).toBe(true);
+    expect(evidence.nodes.some((v:{classes:string[]})=>v.classes.includes('se-main-container'))).toBe(true);
+    expect(evidence.neighborhood.some((v:{context:unknown[]})=>v.context.length>0)).toBe(true);
+    expect(JSON.stringify(s.diagnostics)).not.toMatch(/private-user|auth-value|private-path|private-token|data-secret/);
+    const imported=parseBrowserDiagnostics({...s.diagnostics,structure:{...s.diagnostics.structure,evidence:{...evidence,nodes:[{node:1,tag:'DIV',classes:['active','private-user'],role:'private-user',itemprop:'private-user',cookie:'secret'}],imageChecks:[{node:1,host:'private-host',reason:'private-secret',query:'private-user'}],neighborhood:[{node:1,kind:'review',selected:'private-user',context:[{node:1,relation:'after',depth:99,secret:'secret'}]}]}}})!;
+    expect(JSON.stringify(imported)).not.toMatch(/private-|secret/); expect(imported.structure!.evidence!.nodes[0].classes).toEqual(['active']);p.dom.window.close();
+  });
+  it('normalizes a known public wrapper consistently for the bookmarklet and imported asset roles',()=>{
+    const wrapper='https://search.pstatic.net/common?src='+encodeURIComponent('https://shop-phinf.pstatic.net/example.jpg?type=w860')+'&type=f300';
+    const p=page(url,automaticFixture().replace('https://shop-phinf.pstatic.net/hero.jpg',wrapper.replaceAll('&','&amp;')));
+    expect(snapshot(p).imageAssets[0].url).toBe('https://shop-phinf.pstatic.net/example.jpg?type=w860');p.dom.window.close();
+    const result=parseBrowserProduct({...sample(),sourceUrl:url,images:[wrapper],imageAssets:[{url:wrapper,role:'primary',confidence:'candidate'}]});
+    expect(result.images).toEqual(['https://shop-phinf.pstatic.net/example.jpg?type=w860']);expect(result.imageAssets![0].url).toBe(result.images[0]);
   });
 });

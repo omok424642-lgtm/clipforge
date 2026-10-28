@@ -1,4 +1,5 @@
-import { allowedCommerceImage, classifyCommerceLink, cleanProductText } from "./commerce-product";
+import { commerceImageAddress } from "./commerce-image-address";
+import { classifyCommerceLink, cleanProductText } from "./commerce-product";
 
 export const BROWSER_FIELDS = ["title", "price", "brand", "options", "description", "specifications", "reviews", "rating", "reviewCount", "images"] as const;
 export const BROWSER_COUNTERS = ["metadataTags", "titleMatches", "priceMatches", "detailRoots", "reviewMatches", "visibleReviews", "visibleImages", "productImages", "frames", "readableFrames", "headingCandidates", "purchaseControls", "productRegions", "ambiguousRegions", "moneyCandidates", "excludedBenefitPrices", "ambiguousPrices", "supportedVisibleImages", "imageHostRejected", "imageScopeRejected", "primaryImages", "additionalImages", "detailImages", "reviewTabOpen", "autoTitle", "autoPrice", "autoPrimaryImage", "rawHeadingElements", "visibleCurrencyNodes"] as const;
@@ -9,7 +10,13 @@ export type BrowserField = typeof BROWSER_FIELDS[number];
 export type BrowserFieldMethod = "visible_dom" | "public_metadata" | "manual_selection" | "user_edit" | "unconfirmed";
 const STRUCTURE_TAGS = ['DIV','SECTION','ARTICLE','MAIN','UL','OL','LI','FIGURE','PICTURE','A','BUTTON','SPAN','P','H1','H2','H3','H4','H5','H6','NAV','IMG','BODY','HTML','OTHER'] as const;
 type StructureTag = typeof STRUCTURE_TAGS[number];
+interface StructureEvidence {
+  imageChecks: { node: number; reason: string; host: string; query: string; sourceSet: boolean; sourceDiffers: boolean; ancestors: number[] }[];
+  nodes: { node: number; parent: number; tag: StructureTag; role: string; itemprop: string; classes: string[]; classCount: number; displayed: boolean; onScreen: boolean; images: number; paragraphs: number; dates: number; ratings: number; sorters: number; foreignLinks: number }[];
+  neighborhood: { node: number; kind: string; selected: string; expanded: string; context: { node: number; relation: string; depth: number }[] }[];
+}
 interface BrowserStructure {
+  evidence?: StructureEvidence;
   version: 1;
   images: { supported: boolean; accepted: boolean; foreign: boolean; ancestors: { tag: StructureTag; images: number; headings: number; detail: boolean; review: boolean }[] }[];
   controls: { kind: 'detail' | 'review'; tag: StructureTag; selected: boolean; controls: boolean; fragment: boolean; onScreen: boolean; ancestorTags: StructureTag[] }[];
@@ -22,7 +29,14 @@ function parseStructure(raw: unknown): BrowserStructure | undefined {
   const list = (v: unknown, limit: number) => Array.isArray(v) ? v.slice(0, limit).map(object) : [];
   const tag = (v: unknown): StructureTag => STRUCTURE_TAGS.includes(v as StructureTag) ? v as StructureTag : 'OTHER';
   const count = (v: unknown) => typeof v === 'number' && Number.isInteger(v) && v >= 0 ? Math.min(v, 1000) : 0;
-  return { version: 1,
+  const enumValue = (v: unknown, values: string[], fallback = 'other') => typeof v === 'string' && values.includes(v) ? v : fallback;
+  const ev = object(b.evidence);
+  const evidence: StructureEvidence | undefined = b.evidence && typeof b.evidence === 'object' ? {
+    imageChecks: list(ev.imageChecks, 24).map(v => ({ node: count(v.node), reason: enumValue(v.reason, ['accepted','unwrapped','invalid','protocol','credentials','port','fragment','sensitive_query','wrapper','host']), host: enumValue(v.host, ['shop-phinf.pstatic.net','shopping-phinf.pstatic.net','search.pstatic.net','phinf.pstatic.net','storep-phinf.pstatic.net','dthumb-phinf.pstatic.net','store.storeimages.cdn-apple.com','other_pstatic']), query: enumValue(v.query,['none','source_wrapper','resize']), sourceSet: v.sourceSet === true, sourceDiffers: v.sourceDiffers === true, ancestors: Array.isArray(v.ancestors) ? v.ancestors.slice(0,7).map(count) : [] })),
+    nodes: list(ev.nodes, 160).map(v => ({ node: count(v.node), parent: count(v.parent), tag: tag(v.tag), role: enumValue(v.role,['tab','tabpanel','tablist','button','list','listitem','heading','main']), itemprop: enumValue(v.itemprop,['description','review','reviewBody','ratingValue','aggregateRating','image']), classes: Array.isArray(v.classes) ? v.classes.filter(c => ['se-main-container','se-component','se-image','se-text','product-detail','review','review-content','active','selected','on'].includes(c)).slice(0,10) : [], classCount: count(v.classCount), displayed: v.displayed === true, onScreen: v.onScreen === true, images: count(v.images), paragraphs: count(v.paragraphs), dates: count(v.dates), ratings: count(v.ratings), sorters: count(v.sorters), foreignLinks: count(v.foreignLinks) })),
+    neighborhood: list(ev.neighborhood,12).filter(v => v.kind === 'detail' || v.kind === 'review').map(v => ({ node: count(v.node), kind: String(v.kind), selected: enumValue(v.selected,['true','false','absent'],'absent'), expanded: enumValue(v.expanded,['true','false','absent'],'absent'), context: list(v.context,24).filter(v => ['ancestor','before','after'].includes(String(v.relation))).map(v => ({ node: count(v.node),relation: String(v.relation),depth: Math.min(count(v.depth),3) })) })),
+  } : undefined;
+  return { version: 1, evidence,
     images: list(b.images, 24).map(v => ({ supported: v.supported === true, accepted: v.accepted === true, foreign: v.foreign === true, ancestors: list(v.ancestors, 7).map(a => ({ tag: tag(a.tag), images: count(a.images), headings: count(a.headings), detail: a.detail === true, review: a.review === true })) })),
     controls: list(b.controls, 30).filter(v => v.kind === 'detail' || v.kind === 'review').map(v => ({ kind: v.kind as 'detail' | 'review', tag: tag(v.tag), selected: v.selected === true, controls: v.controls === true, fragment: v.fragment === true, onScreen: v.onScreen === true, ancestorTags: Array.isArray(v.ancestorTags) ? v.ancestorTags.slice(0, 3).map(tag) : [] })),
   };
@@ -109,17 +123,15 @@ export function parseBrowserProduct(input: unknown): BrowserProductMaterials {
     if (!Array.isArray(b[key])) return [];
     return [...new Set((b[key] as unknown[]).slice(0, max).map(v => redactProductPersonalData(cleanProductText(v, length))).filter(Boolean))];
   };
-  const images = Array.isArray(b.images) ? [...new Set(b.images.filter((v): v is string => {
-    if (typeof v !== "string" || v.length > 2000 || !allowedCommerceImage(v, link.platform)) return false;
-    const u = new URL(v);
-    return !u.hash && ![...u.searchParams.keys()].some(k => /token|auth|session|password|credential|signature/i.test(k));
-  }))].slice(0, 10) : [];
+  const images = Array.isArray(b.images) ? [...new Set(b.images.slice(0, 100).flatMap(v => typeof v === 'string' && v.length <= 2000 ? [commerceImageAddress(v, link.platform).url].filter(Boolean) : []))].slice(0, 10) : [];
   const diagnostic = parseBrowserDiagnostics(b.diagnostics);
   const diagnostics = diagnostic?.platform === link.platform && diagnostic?.productId === link.productId ? diagnostic : undefined;
   const imageAssets: BrowserImageAsset[] = [];
   if (Array.isArray(b.imageAssets)) for (const asset of b.imageAssets.slice(0, 30)) {
-    if (!asset || typeof asset !== "object" || !images.includes(asset.url) || imageAssets.some(a => a.url === asset.url)) continue;
-    imageAssets.push({ url: asset.url, role: ["primary", "additional", "detail", "unclassified"].includes(asset.role) ? asset.role : "unclassified", confidence: ["corroborated", "candidate", "user_provided", "unconfirmed"].includes(asset.confidence) ? asset.confidence : "unconfirmed" });
+    if (!asset || typeof asset !== 'object' || typeof asset.url !== 'string') continue;
+    const url = commerceImageAddress(asset.url, link.platform).url;
+    if (!images.includes(url) || imageAssets.some(a => a.url === url)) continue;
+    imageAssets.push({ url, role: ["primary", "additional", "detail", "unclassified"].includes(asset.role) ? asset.role : "unclassified", confidence: ["corroborated", "candidate", "user_provided", "unconfirmed"].includes(asset.confidence) ? asset.confidence : "unconfirmed" });
   }
   return { version: 1, sourceUrl: link.originalUrl, collectedAt: new Date(b.collectedAt).toISOString(), title: t("title", 300), price: t("price", 100), brand: t("brand", 300), options: list("options", 30, 500), description: t("description", 4000), specifications: list("specifications", 30, 500), images, imageAssets, reviews: list("reviews", 30, 1500), rating: t("rating", 100), reviewCount: t("reviewCount", 100), videoPresent: b.videoPresent === true, scope: "현재 페이지 · 현재 선택 옵션 · 표시된 자료만", reviewOptionMatch: "unconfirmed", rights: { commercialReuse: "unconfirmed", aiUse: "unconfirmed", videoDownload: "unconfirmed", videoEditing: "unconfirmed" }, diagnostics };
 }

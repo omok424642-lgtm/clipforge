@@ -2,7 +2,7 @@ import { commerceImageAddress } from "./commerce-image-address";
 import { classifyCommerceLink, cleanProductText } from "./commerce-product";
 
 export const BROWSER_FIELDS = ["title", "price", "brand", "options", "description", "specifications", "reviews", "rating", "reviewCount", "images"] as const;
-export const BROWSER_COUNTERS = ["metadataTags", "titleMatches", "priceMatches", "detailRoots", "reviewMatches", "visibleReviews", "visibleImages", "productImages", "frames", "readableFrames", "headingCandidates", "purchaseControls", "productRegions", "ambiguousRegions", "moneyCandidates", "excludedBenefitPrices", "ambiguousPrices", "supportedVisibleImages", "imageHostRejected", "imageScopeRejected", "primaryImages", "additionalImages", "detailImages", "reviewTabOpen", "autoTitle", "autoPrice", "autoPrimaryImage", "rawHeadingElements", "visibleCurrencyNodes"] as const;
+export const BROWSER_COUNTERS = ["metadataTags", "titleMatches", "priceMatches", "detailRoots", "reviewMatches", "visibleReviews", "visibleImages", "productImages", "frames", "readableFrames", "headingCandidates", "purchaseControls", "productRegions", "ambiguousRegions", "moneyCandidates", "excludedBenefitPrices", "ambiguousPrices", "supportedVisibleImages", "imageHostRejected", "imageScopeRejected", "primaryImages", "additionalImages", "detailImages", "reviewTabOpen", "autoTitle", "autoPrice", "autoPrimaryImage", "rawHeadingElements", "visibleCurrencyNodes", "rawImages", "imageStagesTruncated"] as const;
 export const BROWSER_PATHS = ["legacy_selector", "metadata", "caption_heading", "product_region", "sale_price", "product_summary", "review_tab", "selected_control", "manual", "unconfirmed"] as const;
 export type BrowserConfidence = "corroborated" | "candidate" | "user_provided" | "unconfirmed";
 export interface BrowserImageAsset { url: string; role: "primary" | "additional" | "detail" | "unclassified"; confidence: BrowserConfidence }
@@ -41,7 +41,23 @@ function parseStructure(raw: unknown): BrowserStructure | undefined {
     controls: list(b.controls, 30).filter(v => v.kind === 'detail' || v.kind === 'review').map(v => ({ kind: v.kind as 'detail' | 'review', tag: tag(v.tag), selected: v.selected === true, controls: v.controls === true, fragment: v.fragment === true, onScreen: v.onScreen === true, ancestorTags: Array.isArray(v.ancestorTags) ? v.ancestorTags.slice(0, 3).map(tag) : [] })),
   };
 }
+export interface BrowserImageStage {
+  index: number; srcPresent: boolean; currentSrcPresent: boolean; currentSrcAttribute: boolean; srcAllowed: boolean; currentAllowed: boolean;
+  srcReason: string; currentReason: string; srcKey: string; currentKey: string; chosen: string;
+  displayed: boolean; visibilityReason: string; contextAllowed: boolean; contextReason: string; viewport: boolean; viewportPosition: string; width: number; height: number;
+  complete: boolean; naturalWidth: number; naturalHeight: number; loading: string; lazyAttributes: boolean;
+  review: boolean; foreign: boolean; inProductRegion: boolean; inDetail: boolean; firstFailure: string; role: string;
+}
+function parseImageStages(raw: unknown): BrowserImageStage[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const count = (v: unknown) => typeof v === 'number' && Number.isInteger(v) && v >= 0 ? Math.min(v,100000) : 0;
+  const value = (v: unknown, allowed: string[], fallback='other') => typeof v === 'string' && allowed.includes(v) ? v : fallback;
+  const key = (v: unknown) => typeof v === 'string' && /^[a-f0-9]{8}$/.test(v) ? v : '';
+  const reasons = ['accepted','unwrapped','invalid','protocol','credentials','port','fragment','sensitive_query','wrapper','host'];
+  return raw.slice(0,200).filter(v=>v && typeof v==='object').map(v=>({ index:count(v.index),srcPresent:v.srcPresent===true,currentSrcPresent:v.currentSrcPresent===true,currentSrcAttribute:v.currentSrcAttribute===true,srcAllowed:v.srcAllowed===true,currentAllowed:v.currentAllowed===true,srcReason:value(v.srcReason,reasons),currentReason:value(v.currentReason,reasons),srcKey:key(v.srcKey),currentKey:key(v.currentKey),chosen:value(v.chosen,['src','currentSrc','none'],'none'),displayed:v.displayed===true,visibilityReason:value(v.visibilityReason,['shown','hidden_attribute','display_none','visibility_hidden','opacity_zero','no_rect']),contextAllowed:v.contextAllowed===true,contextReason:value(v.contextReason,['nav','aside','footer','banner','recommendation','header','hidden','none']),viewport:v.viewport===true,viewportPosition:value(v.viewportPosition,['inside','zero','above','below','left','right']),width:count(v.width),height:count(v.height),complete:v.complete===true,naturalWidth:count(v.naturalWidth),naturalHeight:count(v.naturalHeight),loading:value(v.loading,['lazy','eager','auto'],'auto'),lazyAttributes:v.lazyAttributes===true,review:v.review===true,foreign:v.foreign===true,inProductRegion:v.inProductRegion===true,inDetail:v.inDetail===true,firstFailure:value(v.firstFailure,['visibility','context','size','viewport','loading','address','content_exclusion','collected','image_limit','scope','page_guard']),role:value(v.role,['primary','additional','detail','unclassified'],'unclassified') }));
+}
 export interface BrowserCollectionDiagnostics {
+  imageStages?: BrowserImageStage[];
   structure?: BrowserStructure;
   collectorVersion: string;
   platform: "naver" | "coupang";
@@ -65,6 +81,7 @@ export function parseBrowserDiagnostics(input: unknown): BrowserCollectionDiagno
   const methods = new Set(["visible_dom", "public_metadata", "manual_selection", "user_edit", "unconfirmed"]);
   const sourceFields = Array.isArray(b.fields) ? b.fields.slice(0, 20) : [];
   return {
+    imageStages: parseImageStages(b.imageStages),
     structure: parseStructure(b.structure),
     automaticAssessmentRecorded: b.automaticAssessmentRecorded !== false && ["autoTitle", "autoPrice", "autoPrimaryImage"].every(k => Object.hasOwn(counts, k)),
     collectorVersion: b.collectorVersion, platform: b.platform as "naver" | "coupang", productId: b.productId,

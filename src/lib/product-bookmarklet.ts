@@ -1,10 +1,10 @@
 import { commerceImageAddress } from "./commerce-image-address";
 
-export const PRODUCT_BOOKMARKLET_VERSION = "2026-10-28.5";
+export const PRODUCT_BOOKMARKLET_VERSION = "2026-10-28.6";
 
 /** Self-contained: stringified into a bookmark. No requests, private state or frame traversal. */
 export function collectRenderedProductPage(addressPolicy = commerceImageAddress) {
-  const version = "2026-10-28.5";
+  const version = "2026-10-28.6";
   const h = location.hostname;
   const naver = /^(?:m\.)?smartstore\.naver\.com$|^brand\.naver\.com$/.test(h) && /^\/[^/]+\/products\/\d+\/?$/.test(location.pathname);
   const coupang = /^(?:www\.|m\.)?coupang\.com$/.test(h) && /^\/(?:vp|vm)\/products\/\d+\/?$/.test(location.pathname);
@@ -382,6 +382,32 @@ export function collectRenderedProductPage(addressPolicy = commerceImageAddress)
       }
       return { node: profile(e), kind: areaKind(e), selected: e.hasAttribute('aria-selected') ? e.getAttribute('aria-selected') === 'true' ? 'true' : 'false' : 'absent', expanded: e.hasAttribute('aria-expanded') ? e.getAttribute('aria-expanded') === 'true' ? 'true' : 'false' : 'absent', context: context.slice(0,24) };
     });
+    // Trace before eligibility filtering: excluded/offscreen/loading images must not disappear from diagnostics.
+    const rawImages = query(['img']).filter((e): e is HTMLImageElement => e instanceof HTMLImageElement && !e.closest('#clipforge-product-import'));
+    const fingerprint = (url: string) => {
+      if (!url) return '';
+      let value = 2166136261; for (const c of imageKey(url)) value = Math.imul(value ^ c.charCodeAt(0), 16777619);
+      return (value >>> 0).toString(16).padStart(8,'0'); // Diagnostic correlation only, never a security identity.
+    };
+    const imageStages = rawImages.map((img,index) => ({img,index})).sort((a,b) => Number(!!addressPolicy(b.img.src,naver?'naver':'coupang').url) - Number(!!addressPolicy(a.img.src,naver?'naver':'coupang').url)).slice(0,200).map(({img,index}) => {
+      const src = addressPolicy(img.src,naver?'naver':'coupang'), current = addressPolicy(img.currentSrc,naver?'naver':'coupang');
+      let visibilityReason = img.closest('[hidden],[aria-hidden="true"]') ? 'hidden_attribute' : 'shown';
+      if (visibilityReason === 'shown') for(let p: Element | null = img; p; p=p.parentElement) {
+        const style=getComputedStyle(p);
+        if(style.display==='none'){visibilityReason='display_none';break;}
+        if(style.visibility==='hidden'||style.visibility==='collapse'){visibilityReason='visibility_hidden';break;}
+        if(style.opacity==='0'){visibilityReason='opacity_zero';break;}
+      }
+      if(visibilityReason==='shown'&&!img.getClientRects().length) visibilityReason='no_rect';
+      const rect = img.getBoundingClientRect(), visible = displayed(img), context = rendered(img), url = imageUrl(img);
+      const viewport = rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 && rect.top < innerHeight && rect.left < innerWidth;
+      const role = imageAssets.find(a => url && imageKey(a.url) === imageKey(url))?.role || 'unclassified';
+      const selectedPolicy = img.currentSrc ? current : src;
+      const firstFailure = !visible ? 'visibility' : !context ? 'context' : rect.width <= 0 || rect.height <= 0 ? 'size' : !viewport ? 'viewport' : !img.complete || img.naturalWidth <= 0 ? 'loading' : !selectedPolicy.url ? 'address' : !usableImages.includes(img) ? 'content_exclusion' : role !== 'unclassified' ? 'collected' : assets.some(a => imageKey(a.url) === imageKey(url)) ? 'image_limit' : 'scope';
+      const header = img.closest('header');
+      const contextReason = img.closest('nav') ? 'nav' : img.closest('aside') ? 'aside' : img.closest('footer') ? 'footer' : img.closest('[role="banner"]') ? 'banner' : img.closest('[class*="recommend" i],[class*="related" i],[id*="recommend" i],[aria-label*="추천"]') ? 'recommendation' : header && !header.closest('main,article,section,[role="main"],[itemtype*="Product"]') ? 'header' : img.closest('[hidden],[aria-hidden="true"]') ? 'hidden' : context ? 'none' : 'other';
+      return { index:index+1, srcPresent:!!img.getAttribute('src'), currentSrcPresent:!!img.currentSrc, currentSrcAttribute:img.hasAttribute('currentSrc'), srcAllowed:!!src.url, currentAllowed:!!current.url, srcReason:src.reason, currentReason:current.reason, srcKey:fingerprint(src.url), currentKey:fingerprint(current.url), chosen:img.currentSrc?'currentSrc':img.src?'src':'none', displayed:visible, visibilityReason, contextAllowed:context, contextReason, viewport, viewportPosition:rect.width<=0||rect.height<=0?'zero':rect.bottom<=0?'above':rect.top>=innerHeight?'below':rect.right<=0?'left':rect.left>=innerWidth?'right':'inside', width:Math.min(Math.max(0,Math.round(rect.width)),100000), height:Math.min(Math.max(0,Math.round(rect.height)),100000), complete:img.complete, naturalWidth:Math.min(img.naturalWidth,100000), naturalHeight:Math.min(img.naturalHeight,100000), loading:img.getAttribute('loading')==='lazy'?'lazy':img.getAttribute('loading')==='eager'?'eager':'auto', lazyAttributes:['data-src','data-original','data-lazy-src'].some(a=>img.hasAttribute(a)), review:reviewRoots.some(r=>r.contains(img))||!!img.closest('[itemprop="review"],[data-shp-area="review"],.sdp-review'), foreign:foreignProduct(img)||adLinkedImage(img), inProductRegion:!!region?.root.contains(img), inDetail:detailRoots.some(r=>r.contains(img)), firstFailure, role };
+    });
     const structureEvidence = {
       imageChecks: allScreenImages.slice(0,24).map(e => {
         const img = e as HTMLImageElement, check = addressPolicy(img.currentSrc || img.src, naver ? 'naver' : 'coupang');
@@ -405,9 +431,9 @@ export function collectRenderedProductPage(addressPolicy = commerceImageAddress)
     const amount = usableMeta ? meta("product:price:amount") || meta("og:price:amount") : "";
     const priceMeta = /^\d+(?:\.\d+)?$/.test(amount) ? `${amount}${/^(KRW|원)$/i.test(meta("product:price:currency") || meta("og:price:currency")) ? "원" : " (통화·옵션 확인 필요)"}` : "";
     const diagnostics = {
-      structure, automaticAssessmentRecorded: true, collectorVersion: version, platform: naver ? "naver" : "coupang", productId: location.pathname.split('/').filter(Boolean).pop() || "",
+      imageStages, structure, automaticAssessmentRecorded: true, collectorVersion: version, platform: naver ? "naver" : "coupang", productId: location.pathname.split('/').filter(Boolean).pop() || "",
       pageState: document.readyState, topFrame: window.top === window, metadataIdentity: identity, blockedPage: blocked,
-      counts: { metadataTags: query(['head meta[property^="og:"]', 'head meta[property^="product:"]']).length, titleMatches: query(adapter.title).length, priceMatches: query(adapter.price).length, detailRoots: detailRoots.length, reviewMatches: new Set([...query(adapter.reviews).filter(e => reviewRoots.some(r => r.contains(e)) && onScreen(e)).map(e => text(e, 1500)), ...structuredBodies].filter(Boolean)).size, visibleReviews: reviews.length, visibleImages: allScreenImages.length, productImages: images.length, frames: frames.length, readableFrames, headingCandidates: 0, purchaseControls: 0, productRegions: 0, ambiguousRegions: 0, moneyCandidates: 0, excludedBenefitPrices: 0, ambiguousPrices: 0, supportedVisibleImages: 0, imageHostRejected: 0, imageScopeRejected: 0, primaryImages: 0, additionalImages: 0, detailImages: 0, reviewTabOpen: 0, autoTitle: 0, autoPrice: 0, autoPrimaryImage: 0, rawHeadingElements: 0, visibleCurrencyNodes: 0 },
+      counts: { metadataTags: query(['head meta[property^="og:"]', 'head meta[property^="product:"]']).length, titleMatches: query(adapter.title).length, priceMatches: query(adapter.price).length, detailRoots: detailRoots.length, reviewMatches: new Set([...query(adapter.reviews).filter(e => reviewRoots.some(r => r.contains(e)) && onScreen(e)).map(e => text(e, 1500)), ...structuredBodies].filter(Boolean)).size, visibleReviews: reviews.length, visibleImages: allScreenImages.length, productImages: images.length, frames: frames.length, readableFrames, headingCandidates: 0, purchaseControls: 0, productRegions: 0, ambiguousRegions: 0, moneyCandidates: 0, excludedBenefitPrices: 0, ambiguousPrices: 0, supportedVisibleImages: 0, imageHostRejected: 0, imageScopeRejected: 0, primaryImages: 0, additionalImages: 0, detailImages: 0, reviewTabOpen: 0, autoTitle: 0, autoPrice: 0, autoPrimaryImage: 0, rawHeadingElements: 0, visibleCurrencyNodes: 0, rawImages: rawImages.length, imageStagesTruncated: Math.max(0,rawImages.length-imageStages.length) },
       fields: [] as { name: Field; method: Method; path: Path; confidence: Confidence }[],
     };
     const data = {
@@ -427,7 +453,7 @@ export function collectRenderedProductPage(addressPolicy = commerceImageAddress)
     if (imageAssets.length) evidence.images = { path: 'product_region', confidence: imageAssets.some(a => a.confidence === 'corroborated') ? 'corroborated' : 'candidate' };
     if (blocked || identity === "mismatch" || window.top !== window) {
       for (const f of fields) { if (Array.isArray(data[f])) (data[f] as string[]) = []; else (data[f] as string) = ""; methods[f] = "unconfirmed"; }
-      data.videoPresent = false; data.imageAssets = [];
+      data.videoPresent = false; data.imageAssets = []; imageStages.forEach(t => { t.firstFailure = "page_guard"; t.role = "unclassified"; });
     }
     diagnostics.fields = fields.map(name => ({ name, method: methods[name], ...(methods[name] === "unconfirmed" ? { path: "unconfirmed" as Path, confidence: "unconfirmed" as Confidence } : evidence[name]) }));
     Object.assign(diagnostics.counts, {
@@ -482,6 +508,7 @@ export function collectRenderedProductPage(addressPolicy = commerceImageAddress)
     lines.push("문서 complete도 동적 상품 영역의 준비 완료를 보장하지 않습니다. 상품이 보인 후 다시 읽으세요.");
     lines.push(`자동 추출 당시(직접 선택 제외): 상품명 ${c.autoTitle ? '찾음' : '미확인'}, 가격 ${c.autoPrice ? '찾음' : '미확인'}, 대표 이미지 ${c.autoPrimaryImage ? '찾음' : '미확인'}`);
     lines.push(`표시 제목 요소 ${c.rawHeadingElements}, 통화 표시 요소 ${c.visibleCurrencyNodes}. 제목 후보 ${c.headingCandidates}, 구매 버튼 ${c.purchaseControls}, 상품 영역 ${c.productRegions}, 영역 충돌 ${c.ambiguousRegions}, 판매가 후보 ${c.moneyCandidates}, 혜택 금액 제외 ${c.excludedBenefitPrices}`);
+    lines.push(`필터 전 img ${c.rawImages}개 / 단계 추적 ${d.imageStages.length}개 / 기록 한도 제외 ${c.imageStagesTruncated}개. 제외된 이미지도 visibility·context·viewport·loading·address·scope를 기록합니다. img[currentSrc]는 속성 선택자이며 currentSrc 속성(property)과 다릅니다.`);
     lines.push("이미지 호스트 제외 수는 과거 호환용 합계입니다. 새 진단의 imageChecks.reason에서 호스트·프로토콜·쿼리·주소 형식을 구분합니다. currentSrc만으로 실제 리다이렉트 이력을 확인할 수 없습니다.");
     lines.push(`구조 진단: 이미지 조상 ${d.structure.images.length}개 / 상세·리뷰 표지 ${d.structure.controls.length}개. 텍스트·클래스명·주소·작성자 정보는 저장하지 않습니다.`);
     lines.push(`대표 ${c.primaryImages} / 추가 ${c.additionalImages} / 상세 ${c.detailImages}, 이미지 호스트 제외 ${c.imageHostRejected} / 상품 범위 제외 ${c.imageScopeRejected}. 리뷰 탭 ${c.reviewTabOpen ? '열림 단서 있음' : '열림 미확인'}. 리뷰 수와 본문 수는 별개입니다.`);
@@ -573,6 +600,25 @@ export function collectRenderedProductPage(addressPolicy = commerceImageAddress)
   const close = document.createElement('button'); close.textContent = "닫기"; close.onclick = () => { endPick(); host.remove(); }; root.append(save, close);
   const controls = document.createElement('div'); controls.append(reRead, pickText, pickImage, exportDiagnostic); root.insertBefore(controls, evidence);
   paint(); document.documentElement.append(host);
+  // Observe ordinary browser image loading only. Never force lazy loading or request data-src/private APIs.
+  const loadNote = document.createElement('p'); root.insertBefore(loadNote, diagnosticsBox);
+  const deadline = Date.now() + 10000;
+  const pending = query(['img']).filter((e): e is HTMLImageElement => e instanceof HTMLImageElement && onScreen(e) && (!e.complete || e.naturalWidth <= 0 || !addressPolicy(e.currentSrc || e.src,naver?'naver':'coupang').url) && !!addressPolicy(e.src,naver?'naver':'coupang').url);
+  if(pending.length) loadNote.textContent='화면 안 이미지의 정상 로딩을 최대 10초 관찰합니다. 직접 수정·승인하기 전에는 로딩 이벤트 후 자동 재검사합니다. 이후에는 현재 페이지 다시 읽기를 이용하세요.';
+  let loadTimer: ReturnType<typeof setTimeout> | undefined;
+  const loaded = () => {
+    if (Date.now() > deadline || !host.isConnected) return;
+    if (edited || check.checked || variantKey() !== snapshotKey || readOptions().join('\n') !== snapshotOptions) { loadNote.textContent='이미지 로딩이 끝났습니다. 수정·승인한 자료 보호를 위해 자동 교체하지 않았습니다. 현재 페이지 다시 읽기를 이용하세요.'; return; }
+    if (loadTimer) clearTimeout(loadTimer);
+    loadTimer = setTimeout(() => {
+      if (!host.isConnected || edited || check.checked || variantKey() !== snapshotKey || readOptions().join('\n') !== snapshotOptions) return;
+      data = scan(); snapshotOptions = readOptions().join('\n'); paint(); loadNote.textContent='브라우저 이미지 로딩 이벤트 후 자동 재검사했습니다. 자동 수집 결과와 사용 권한을 확인해 주세요.';
+    },50);
+  };
+  for (const img of pending) img.addEventListener('load',loaded);
+  const closePage = close.onclick;
+  close.onclick = event => { for(const img of pending) img.removeEventListener('load',loaded); if(loadTimer) clearTimeout(loadTimer); closePage?.call(close,event); };
+
 }
 
 export function productBookmarklet(): string {

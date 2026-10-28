@@ -6,7 +6,7 @@ const paths = { legacy_selector: "기존 상품 요소", metadata: "공개 메�
 const confidence = { corroborated: "복수 단서 일치 · 원본 확인 필요", candidate: "후보 · 원본 비교 필요", user_provided: "사용자 보완 · 자동 수집 아님", unconfirmed: "미확인" };
 
 export function BrowserCollectionDiagnosticsView({ diagnostics: d }: { diagnostics?: BrowserCollectionDiagnostics }) {
-  if (!d) return <p className="rounded border p-3 text-sm">이 자료에는 새 진단 정보가 없습니다. 기존 즐겨찾기를 삭제하고 버전 2026-10-28.5 버튼을 다시 등록해 주세요. 이전 파일도 직접 보완해 사용할 수 있습니다.</p>;
+  if (!d) return <p className="rounded border p-3 text-sm">이 자료에는 새 진단 정보가 없습니다. 기존 즐겨찾기를 삭제하고 버전 2026-10-28.6 버튼을 다시 등록해 주세요. 이전 파일도 직접 보완해 사용할 수 있습니다.</p>;
   return <section className="space-y-2 rounded border p-4">
     <h3 className="font-semibold">페이지 수집 진단 · {d.collectorVersion}</h3>
     <p className="text-sm">{d.platform === "naver" ? "네이버" : "쿠팡"} 상품 {d.productId} · 문서 {d.pageState} · 최상위 탭 {d.topFrame ? "예" : "아니요"}</p>
@@ -18,6 +18,7 @@ export function BrowserCollectionDiagnosticsView({ diagnostics: d }: { diagnosti
     <p className="text-sm">대표 {d.counts.primaryImages} / 추가 {d.counts.additionalImages} / 상세 {d.counts.detailImages} · 이미지 호스트 제외 {d.counts.imageHostRejected} / 범위 제외 {d.counts.imageScopeRejected} · 리뷰 탭 {d.counts.reviewTabOpen ? "열림 단서 있음" : "열림 미확인"}</p>
     {d.structure && <details className="text-sm"><summary>개인정보 없는 DOM 구조 진단</summary><p>화면 이미지 {d.structure.images.length}개의 조상 태그·이미지 수, 상세/리뷰 표지 {d.structure.controls.length}개의 연결 상태만 기록합니다. 원문·임의 클래스명·작성자·주소는 포함하지 않습니다. 고정 목록의 의미 있는 클래스, 속성 종류와 익명 노드 연결만 기록합니다.</p><pre className="max-h-64 overflow-auto">{JSON.stringify(d.structure, null, 2)}</pre></details>}
     {d.structure?.evidence && <p className="text-sm">이미지 주소 진단: {d.structure.evidence.imageChecks.map((v,i) => `${i+1}번 ${v.host} / ${v.reason} / 쿼리 ${v.query}`).join(' · ')}. 호스트 제외 수는 주소 검사 실패 전체의 호환용 합계입니다. 이 진단으로 실제 리다이렉트 이력을 알 수는 없습니다.</p>}
+    {d.imageStages && <details className="text-sm"><summary>필터 전 이미지 단계 추적 ({d.counts.rawImages}개 중 {d.imageStages.length}개)</summary><p>src/currentSrc 지문으로 같은 공개 이미지를 비교합니다. URL·경로·개인정보는 기록하지 않습니다. currentSrc는 DOM 속성(property)이며 img[currentSrc] 선택자로 찾는 HTML 속성이 아닙니다. 실제 사이트에서 어느 단계가 실패했는지 확인하는 진단입니다.</p><p>기록 한도 제외 {d.counts.imageStagesTruncated}개. visibility: 숨김 / context: 제외 문맥 / size: 크기 0 / viewport: 화면 밖 / loading: 로딩 미완료 / address: 주소 검사 / content_exclusion: 후기·광고 등 / scope: 상품 영역 미확인 / collected: 수집 후보.</p><pre className="max-h-80 overflow-auto">{JSON.stringify(d.imageStages,null,2)}</pre></details>}
     <ul className="list-disc pl-5 text-sm">{d.fields.map(f => <li key={f.name}>{names[f.name]}: {methods[f.method]} · {paths[f.path] || "경로 미확인"} · {confidence[f.confidence] || "미확인"}</li>)}</ul>
     {d.pageState !== "complete" && <p>페이지가 로딩 중이었습니다. 로딩 후 북마클릿에서 현재 페이지를 다시 읽으세요.</p>}
     <p className="text-sm">문서 complete도 동적 상품 영역의 준비 완료를 보장하지 않습니다. 상품 내용이 보인 뒤 다시 읽으세요.</p>

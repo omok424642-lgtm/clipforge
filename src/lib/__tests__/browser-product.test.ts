@@ -37,7 +37,7 @@ describe("browser import boundary", () => {
   });
 });
 
-function page(url: string, html: string) {
+function page(url: string, html: string, setup?: (window: typeof globalThis) => void) {
   const dom = new JSDOM(html, { url, runScripts: "outside-only", pretendToBeVisual: true });
   const w = dom.window;
   Object.defineProperty(w.HTMLElement.prototype, "innerText", { get() { return this.textContent; } });
@@ -55,6 +55,7 @@ function page(url: string, html: string) {
   const fetch = vi.fn(); Object.assign(w, { fetch });
   Object.defineProperty(w, "__PRELOADED_STATE__", { get() { throw new Error("Private state must not be read"); } });
   Object.defineProperty(w.document, "cookie", { get() { throw new Error("Cookies must not be read"); } });
+  setup?.(w);
   w.eval(`(${collectRenderedProductPage.toString()})(${commerceImageAddress.toString()})`);
   return { dom, w, fetch, root: w.document.getElementById("clipforge-product-import")?.shadowRoot as ShadowRoot | undefined };
 }
@@ -204,7 +205,7 @@ describe("diagnosing unsupported live-page structures without private state", ()
     const p = page(liveUrl, publicHead);
     const safe = parseBrowserDiagnostics({ ...snapshot(p).diagnostics, html: '<div>개인정보</div>', cookie: 'secret', sourceUrl: 'https://private/token', counts: { ...snapshot(p).diagnostics.counts, private: 'secret', frames: -5 } });
     expect(JSON.stringify(safe)).not.toMatch(/개인정보|secret|private|token/); expect(safe!.counts.frames).toBe(0);
-    const material = parseBrowserProduct(snapshot(p)); expect(material.diagnostics!.collectorVersion).toBe('2026-10-28.5');
+    const material = parseBrowserProduct(snapshot(p)); expect(material.diagnostics!.collectorVersion).toBe('2026-10-28.6');
     expect(parseBrowserDiagnostics({ collectorVersion: 'injected-private-text' })).toBeUndefined(); p.dom.window.close();
   });
   it("does not attach diagnostics from a different product to a material snapshot", () => {
@@ -397,5 +398,61 @@ describe('unlinked brandstore buttons and redacted structural evidence', () => {
     expect(snapshot(p).imageAssets[0].url).toBe('https://shop-phinf.pstatic.net/example.jpg?type=w860');p.dom.window.close();
     const result=parseBrowserProduct({...sample(),sourceUrl:url,images:[wrapper],imageAssets:[{url:wrapper,role:'primary',confidence:'candidate'}]});
     expect(result.images).toEqual(['https://shop-phinf.pstatic.net/example.jpg?type=w860']);expect(result.imageAssets![0].url).toBe(result.images[0]);
+  });
+});
+
+describe('image stages before any candidate filtering', () => {
+  // Public src supplied by the user. Regression fixture only; never used as a runtime selector/allowlist.
+  const hero='https://shop-phinf.pstatic.net/20251219_235/1766124416004ekFHL_PNG/19050477522435734_89888140.png?type=m10000_10000_no_rotate';
+  const fixture=()=>automaticFixture().replace('https://shop-phinf.pstatic.net/hero.jpg',hero).replace('id="hero"','id="hero" draggable="false" class="FmblYTdiVt"');
+  const traced=(s:ReturnType<typeof snapshot>)=>s.diagnostics.imageStages.find((t:{srcKey:string;index:number})=>t.index===1);
+  it('automatically collects the exact supplied src without a CSS selector and reads currentSrc as a property',()=>{
+    const p=page('https://brand.naver.com/fixture/products/778899',fixture(),w=>{
+      Object.defineProperty(w.HTMLImageElement.prototype,'currentSrc',{get(){return this.getAttribute('src')||'';}});
+    });
+    const s=snapshot(p),t=traced(s);expect(s.imageAssets[0].url).toBe(hero);expect(t).toMatchObject({srcPresent:true,currentSrcPresent:true,currentSrcAttribute:false,srcAllowed:true,currentAllowed:true,chosen:'currentSrc',firstFailure:'collected',role:'primary'});expect(t.srcKey).toBe('53c5fed9');expect(t.srcKey).toBe(t.currentKey);
+    expect(p.w.document.querySelectorAll('img[currentSrc]')).toHaveLength(0);
+    expect(JSON.stringify(s.diagnostics)).not.toMatch(/FmblYTdiVt|1766124416004|19050477522435734|https:/);p.dom.window.close();
+  });
+  it.each([
+    ['viewport','data-offscreen'],['size','data-width="0"'],['visibility','hidden'],['loading','data-pending loading="lazy" data-src="DO_NOT_READ"'],['loading','data-broken'],
+  ])('records %s instead of omitting the supplied image (%s)',(stage,attribute)=>{
+    const p=page(liveUrl,fixture().replace('id="hero"',`id="hero" ${attribute}`).replace('data-width="0" draggable="false" class="FmblYTdiVt" data-width="300"','data-width="0" draggable="false" class="FmblYTdiVt"'));
+    expect(traced(snapshot(p))).toMatchObject({srcAllowed:true,firstFailure:stage});expect(JSON.stringify(snapshot(p).diagnostics)).not.toContain('DO_NOT_READ');p.dom.window.close();
+  });
+  it.each([['display:none','display_none'],['visibility:hidden','visibility_hidden'],['opacity:0','opacity_zero']])('records the exact CSS exclusion %s', (style,reason)=>{
+    const p=page(liveUrl,fixture().replace('id="hero"',`id="hero" style="${style}"`));
+    expect(traced(snapshot(p))).toMatchObject({firstFailure:'visibility',visibilityReason:reason,srcAllowed:true});p.dom.window.close();
+  });
+  it.each(['nav','header'])('records context exclusion in %s without widening product collection',tag=>{
+    const p=page(liveUrl,fixture().replace('<img id="hero"',`<${tag}><img id="hero"`).replace('no_rotate">',`no_rotate"></${tag}>`));
+    expect(traced(snapshot(p))).toMatchObject({srcAllowed:true,displayed:true,viewport:true,contextAllowed:false,contextReason:tag,firstFailure:'context'});p.dom.window.close();
+  });
+  it('does not fall back to src while currentSrc is an unsupported placeholder',()=>{
+    const p=page(liveUrl,fixture(),w=>{Object.defineProperty(w.HTMLImageElement.prototype,'currentSrc',{get(){return this.id==='hero'?'data:image/gif;base64,AA==':'';}});});
+    const s=snapshot(p);expect(traced(s)).toMatchObject({srcAllowed:true,currentAllowed:false,currentReason:'protocol',chosen:'currentSrc',firstFailure:'address'});expect(s.images).not.toContain(hero);p.dom.window.close();
+  });
+  it('records a loaded candidate rejected only by product scope',()=>{
+    const p=page(liveUrl,automaticFixture()+`<div><img src="${hero}"></div>`);const s=snapshot(p);
+    expect(s.diagnostics.imageStages.find((t:{firstFailure:string})=>t.firstFailure==='scope')).toMatchObject({srcAllowed:true,displayed:true,viewport:true,complete:true,role:'unclassified'});p.dom.window.close();
+  });
+  it('automatically rescans an ordinary late-loaded image without requests or manual selection',async()=>{
+    const p=page(liveUrl,fixture().replace('id="hero"','id="hero" data-pending loading="lazy"'));
+    expect(traced(snapshot(p)).firstFailure).toBe('loading');const img=p.w.document.getElementById('hero')!;img.removeAttribute('data-pending');img.dispatchEvent(new p.w.Event('load'));
+    await vi.waitFor(()=>expect(snapshot(p).images).toContain(hero));expect(snapshot(p).diagnostics.counts.autoPrimaryImage).toBe(1);expect(p.fetch).not.toHaveBeenCalled();p.dom.window.close();
+  });
+  it('does not overwrite edited or approved snapshots after a late image event',async()=>{
+    for (const protect of ['edit','approve']) {
+      const p=page(liveUrl,fixture().replace('id="hero"','id="hero" data-pending'));
+      if(protect==='edit'){const input=p.root!.querySelector('textarea[aria-label="상품명"]') as HTMLTextAreaElement;input.value='사용자가 수정한 이름';input.dispatchEvent(new p.w.Event('input'));}
+      else {const check=Array.from(p.root!.querySelectorAll('label')).find(l=>l.textContent?.includes('자료 확인 및 개인정보 제거를 완료했습니다.'))!.querySelector('input') as HTMLInputElement;check.checked=true;check.dispatchEvent(new p.w.Event('change'));}
+      const before=JSON.stringify(snapshot(p));const img=p.w.document.getElementById('hero')!;img.removeAttribute('data-pending');img.dispatchEvent(new p.w.Event('load'));await new Promise(r=>setTimeout(r,80));expect(JSON.stringify(snapshot(p))).toBe(before);p.dom.window.close();
+    }
+  });
+  it('bounds and sanitizes imported stage traces and accepts older diagnostics without traces',()=>{
+    const p=page(liveUrl,fixture());const s=snapshot(p);
+    const d=parseBrowserDiagnostics({...s.diagnostics,imageStages:Array(210).fill({index:999999,srcKey:'private-name',currentKey:'1234abcd',firstFailure:'private-text',contextReason:'private',url:'secret',srcReason:'secret',width:-1})})!;
+    expect(d.imageStages).toHaveLength(200);expect(d.imageStages![0]).toMatchObject({index:100000,srcKey:'',currentKey:'1234abcd',firstFailure:'other',contextReason:'other',width:0});expect(JSON.stringify(d)).not.toMatch(/private|secret/);
+    expect(parseBrowserDiagnostics({...s.diagnostics,imageStages:undefined})!.imageStages).toBeUndefined();p.dom.window.close();
   });
 });

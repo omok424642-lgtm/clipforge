@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useProductLibraryStore } from "@/lib/stores/product-library-store";
 import { missingCommerceFields, type CommerceProductDraft } from "@/lib/commerce-product";
+import { BrowserCollectionDiagnosticsView } from "@/components/browser-collection-diagnostics";
 
 const methods = { manual: "직접 입력 필요", naver_search_api: "종료된 네이버 검색 API — 현재 사용 불가", coupang_partners_api: "쿠팡 파트너스 API", public_metadata: "공개 상품 정보", browser_page: "사용자가 확인한 브라우저 페이지 자료" };
 
@@ -102,6 +103,7 @@ export default function CommerceImportPage() {
       </div>
       <ul className="list-disc space-y-2 pl-5 text-sm text-muted-foreground">{draft.warnings.map((warning, i) => <li key={i}>{warning}</li>)}</ul>
       {draft.browserMaterials && <section className="space-y-2 rounded-lg border p-3">
+        <BrowserCollectionDiagnosticsView diagnostics={draft.browserMaterials.diagnostics} />
         <h3 className="font-semibold">브라우저에서 확인한 원본 자료 (검증·AI 분석 전)</h3>
         <p>브랜드: {draft.browserMaterials.brand || "미확인"} · 평점: {draft.browserMaterials.rating || "미확인"}</p>
         <p>상품 소개 영상: {draft.browserMaterials.videoPresent ? "페이지에 영상 요소 있음 · 재생·다운로드·편집 권한 미확인" : "미확인"}</p>

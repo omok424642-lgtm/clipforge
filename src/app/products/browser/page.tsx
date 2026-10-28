@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { productBookmarklet } from "@/lib/product-bookmarklet";
-import { parseBrowserProduct, type BrowserProductMaterials } from "@/lib/browser-product";
+import { PRODUCT_BOOKMARKLET_VERSION, productBookmarklet } from "@/lib/product-bookmarklet";
+import { parseBrowserDiagnostics, parseBrowserProduct, type BrowserCollectionDiagnostics, type BrowserProductMaterials } from "@/lib/browser-product";
+import { BrowserCollectionDiagnosticsView } from "@/components/browser-collection-diagnostics";
 
 export default function BrowserImportPage() {
   const anchor = useRef<HTMLAnchorElement>(null);
@@ -16,6 +17,7 @@ export default function BrowserImportPage() {
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
+  const [diagnostic, setDiagnostic] = useState<BrowserCollectionDiagnostics | null>(null);
   useEffect(() => {
     const value = productBookmarklet(); setCode(value);
     // React deliberately blocks javascript: JSX URLs; this bookmark is explicitly installed by the user.
@@ -27,7 +29,7 @@ export default function BrowserImportPage() {
   };
   const edit = (value: Partial<BrowserProductMaterials>) => {
     if (!material) return;
-    const updated = { ...material, ...value }; setMaterial(updated); setRaw(JSON.stringify(updated, null, 2)); setConfirmed(false);
+    const updated = { ...material, ...value, diagnostics: material.diagnostics && { ...material.diagnostics, fields: material.diagnostics.fields.map(f => Object.hasOwn(value, f.name) ? { ...f, method: "user_edit" as const } : f) } }; setMaterial(updated); setRaw(JSON.stringify(updated, null, 2)); setConfirmed(false);
   };
   const send = async () => {
     if (!material || !confirmed) return;
@@ -43,12 +45,23 @@ export default function BrowserImportPage() {
     <h1 className="text-2xl font-bold">즐겨찾기로 상품 가져오기</h1>
     <section className="space-y-3 rounded-xl border p-5">
       <h2 className="text-xl font-semibold">1. Windows 크롬에 버튼 등록</h2>
+      <p className="rounded border p-3 font-medium">새 버전 {PRODUCT_BOOKMARKLET_VERSION} · 기존 즐겨찾기는 자동 갱신되지 않습니다. 이전 ‘상품 가져오기’를 삭제하고 아래 버튼을 다시 등록해 주세요. 상품 페이지의 확인창에도 같은 버전이 표시되어야 합니다.</p>
       <p>Ctrl + Shift + B로 즐겨찾기 모음을 표시하고, 아래 버튼을 즐겨찾기 모음으로 끌어 놓으세요.</p>
       <a ref={anchor} draggable className="inline-block rounded-lg border bg-muted p-3 font-bold">상품 가져오기</a>
       <p>끌어 놓기가 안 되면 Ctrl + Shift + O → 오른쪽 위 ⋮ → 새 북마크 추가에서 이름은 ‘상품 가져오기’, URL은 아래 코드 전체를 붙여넣으세요.</p>
       <details><summary>수동 등록용 코드</summary><textarea aria-label="북마클릿 코드" readOnly value={code} className="h-32 w-full border p-2" /></details>
       <p>네이버 스마트스토어·브랜드스토어 또는 쿠팡 상품 페이지에서 옵션을 선택하고 필요한 상세정보·구매평을 직접 펼친 뒤 버튼을 누르세요. 표시된 내용과 이미지를 확인하고 개인정보를 지운 후 자료 파일을 저장하세요.</p>
       <p className="text-sm">페이지 구조 변경·접근 제한·iframe·보안 정책으로 일부 항목이나 버튼이 작동하지 않을 수 있습니다. 제한은 우회하지 않습니다. 그때는 아래에 직접 자료를 입력하거나 기존 상품 가져오기 화면에서 보완하세요. 반복 실행·자동 스크롤·다른 리뷰 페이지 조회는 하지 않습니다.</p>
+      <p>상품명·가격이 비면 페이지 수집 진단을 확인하고 ‘현재 페이지 다시 읽기’를 누르세요. 화면에 자료가 있는데도 비면 ‘화면 글자 직접 선택’ 또는 ‘화면 이미지 직접 선택’으로 보완할 수 있습니다. 진단 파일에는 페이지 HTML·상품 본문·작성자·쿠키를 넣지 않습니다.</p>
+      <details><summary>저장한 진단 파일만 열어 보기 (서버 전송 없음)</summary>
+        <input aria-label="진단 파일" type="file" accept="application/json,.json" onChange={async e => {
+          const file = e.target.files?.[0]; if (!file) return;
+          setDiagnostic(null);
+          try { if (file.size > 20000) throw new Error("20KB 이하 진단 파일만 열 수 있습니다."); const parsed = parseBrowserDiagnostics(JSON.parse(await file.text())); if (!parsed) throw new Error("상품 자료 파일이 아니라 clipforge-diagnostic.json을 선택해 주세요."); setDiagnostic(parsed); setError(""); }
+          catch (err) { setError(err instanceof Error ? err.message : "진단 파일을 읽지 못했습니다."); }
+        }} />
+        {diagnostic && <BrowserCollectionDiagnosticsView diagnostics={diagnostic} />}
+      </details>
     </section>
     <section className="space-y-3 rounded-xl border p-5">
       <h2 className="text-xl font-semibold">2. 저장한 자료 확인</h2>
@@ -61,6 +74,7 @@ export default function BrowserImportPage() {
       }} />
       <details><summary>고급: 자료 파일 내용 직접 수정</summary><label className="block">개인정보·다른 옵션·안내 문구 제거<textarea aria-label="상품 자료 내용" className="h-60 w-full rounded border p-2" value={raw} onChange={e => { setRaw(e.target.value); setMaterial(null); setConfirmed(false); }} /></label><button className="rounded border p-3" onClick={() => inspect()}>자료 내용 확인</button></details>
       {material && <div className="space-y-3">
+        <BrowserCollectionDiagnosticsView diagnostics={material.diagnostics} />
         <p>출처: {material.sourceUrl}</p><p>수집 시각: {new Date(material.collectedAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })} (한국 시간)</p>
         <p>상품명: {material.title || "미확인"} / 가격: {material.price || "미확인"} / 브랜드: {material.brand || "미확인"}</p>
         {([['상품명', 'title'], ['가격', 'price'], ['브랜드', 'brand'], ['현재 선택 옵션 (한 줄에 하나)', 'options'], ['상품 상세설명', 'description'], ['제품 사양 (한 줄에 하나)', 'specifications'], ['구매평 (한 줄에 하나, 개인정보·안내 문구 제거)', 'reviews'], ['평점', 'rating']] as const).map(([label, key]) => <label className="block" key={key}>{label}<textarea aria-label={label} placeholder="미확인 — 직접 보완해 주세요" className="block min-h-16 w-full rounded border p-2" value={Array.isArray(material[key]) ? (material[key] as string[]).join("\n") : material[key]} onChange={e => edit({ [key]: Array.isArray(material[key]) ? e.target.value.split("\n") : e.target.value })} /></label>)}

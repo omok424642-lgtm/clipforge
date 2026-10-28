@@ -255,7 +255,8 @@ export function collectRenderedProductPage() {
       const section = heading.closest('section,article,[role="tabpanel"]') || heading.parentElement;
       if (section && !/^(BODY|HTML)$/.test(section.tagName) && section.querySelectorAll('h1,h2,h3').length <= 1) detailRoots.push(section);
     }
-    const usableImages = query(['img']).filter(e => !!imageUrl(e) && !foreignProduct(e) && !adLinkedImage(e) && !/로고|쿠폰|배송|혜택|광고|배너|아바타/.test(e.getAttribute('alt') || ''));
+    const reviewRoots = reviewScopes();
+    const usableImages = query(['img']).filter(e => !!imageUrl(e) && !reviewRoots.some(r => r.contains(e)) && !e.closest('[itemprop="review"],[data-shp-area="review"],.sdp-review') && !foreignProduct(e) && !adLinkedImage(e) && !/로고|쿠폰|배송|혜택|광고|배너|아바타/.test(e.getAttribute('alt') || ''));
     const gallery = [...query(adapter.images), ...matchingImages].filter(e => !detailRoots.some(r => r.contains(e)) && usableImages.includes(e));
     const nearImages = region ? usableImages.filter(e => {
       const a = e.getBoundingClientRect(), b = region.heading.getBoundingClientRect();
@@ -298,7 +299,6 @@ export function collectRenderedProductPage() {
     }
     // Keep old explicitly scoped attribute rows without reading shipping/returns tables.
     if (coupang) specs.push(...many(['.prod-attr-item']));
-    const reviewRoots = reviewScopes();
     const structuredBodies: string[] = [];
     for (const pane of reviewRoots) for (const card of Array.from(pane.querySelectorAll('article,li,[role="listitem"]')).slice(0, 60)) {
       const dates = Array.from(card.querySelectorAll('time,span')).filter(e => rendered(e) && /^\d{4}[.\/-]\s*\d{1,2}[.\/-]\s*\d{1,2}\.?$/.test(text(e, 30)));

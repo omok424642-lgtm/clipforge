@@ -272,6 +272,11 @@ describe("automatic product-region extraction, with zero manual selection", () =
     const p = page(liveUrl, automaticFixture() + '<section><h2>상품 상세설명</h2><img data-width="300" data-height="400" data-y="300" src="https://shop-phinf.pstatic.net/detail.jpg"></section>');
     expect(snapshot(p).imageAssets.map((a: {role: string}) => a.role)).toEqual(['primary','additional','detail']); p.dom.window.close();
   });
+  it("does not relabel a large customer review photo as the representative product image", () => {
+    const p = page(liveUrl, automaticFixture() + '<button role="tab" aria-selected="true" aria-controls="customer-review">리뷰</button><section id="customer-review"><img data-width="600" data-height="600" src="https://shop-phinf.pstatic.net/customer-photo.jpg"></section>');
+    expect(snapshot(p).imageAssets.find((a: {role: string})=>a.role==='primary').url).toContain('/hero.jpg');
+    expect(JSON.stringify(snapshot(p).imageAssets)).not.toContain('customer-photo.jpg'); p.dom.window.close();
+  });
   it("does not choose a larger advertisement image linked to another destination", () => {
     const p = page(liveUrl, automaticFixture() + '<a href="https://ads.example.org/campaign"><img data-width="450" data-height="450" src="https://shop-phinf.pstatic.net/ad.jpg"></a>');
     expect(snapshot(p).imageAssets.find((a: {role: string})=>a.role==='primary').url).toContain('/hero.jpg'); expect(JSON.stringify(snapshot(p).imageAssets)).not.toContain('/ad.jpg'); p.dom.window.close();

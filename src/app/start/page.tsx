@@ -1,5 +1,7 @@
 "use client";
 
+import { referenceForLibrarySelection } from "@/lib/discovery-products";
+
 /**
  * New "act first, configure later" landing page (dark studio direction).
  * Lives as an independent route /start, leaving the homepage (currently being rewritten for i18n) untouched.
@@ -377,7 +379,7 @@ export default function StartPage() {
     const projectRes = await fetch("/api/project", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: t("projectName", { name: productName }), productName, productCategory: "other", productDescription: sellingPoints, productImages: [] }),
+      body: JSON.stringify({ name: t("projectName", { name: productName }), productName, productCategory: "other", productDescription: sellingPoints, productImages: [], productReference: referenceForLibrarySelection(libraryProducts, window.location.search) }),
     });
     if (!projectRes.ok) {
       const errData = await projectRes.json().catch(() => ({}));

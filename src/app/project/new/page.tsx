@@ -1,5 +1,7 @@
 "use client";
 
+import { referenceForLibrarySelection } from "@/lib/discovery-products";
+
 import { randomUUID } from "@/lib/uuid";
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
@@ -531,6 +533,7 @@ export default function NewProjectPage() {
           productCategory: category,
           productDescription: sellingPoints,
           productImages: [],
+          productReference: referenceForLibrarySelection(libraryProducts, window.location.search),
         }),
       });
       if (!projectRes.ok) throw new Error(t("errorCreateFailed"));

@@ -41,7 +41,15 @@
 
 ## GitHub 전달 상태
 
-현재 제공된 `GH_TOKEN`은 `gh auth status`에서 유효하지 않다고 보고되었다. 토큰은 출력하거나 파일에 저장하지 않았다. 로컬 브랜치·커밋을 준비한 뒤 푸시를 시도하며, 실제 성공/실패는 마지막 작업 보고와 원격 조회 결과를 기준으로 판단한다. 이 문서 자체는 PR 생성이나 GitHub 반영의 증거가 아니다. PR이 생성되지 않았으면 주소를 만들어 기재하지 않는다.
+GitHub **브랜치 푸시 완료**. main에는 병합하지 않았다. 선행 기능 커밋은 `e822514`, 북마클릿·Windows 안내 커밋은 `713c417`이며 이후 전달 상태를 문서 커밋으로 보완한다.
+
+- 브랜치: https://github.com/omok424642-lgtm/clipforge/tree/feat/reviewed-browser-product-import
+- PR 생성 화면: https://github.com/omok424642-lgtm/clipforge/compare/main...feat/reviewed-browser-product-import?expand=1
+- 소스 ZIP: https://github.com/omok424642-lgtm/clipforge/archive/refs/heads/feat/reviewed-browser-product-import.zip
+
+**PR 자체는 아직 생성하지 못했다.** `gh pr create`가 `Post https://api.github.com/graphql: Forbidden`으로 실패했다. `gh auth status`도 현재 제공된 GH_TOKEN을 유효하지 않다고 보고했고, 토큰을 제거한 상태에는 CLI 로그인 계정이 없었다. Git 전용 인증은 정상 작동해 푸시는 성공했지만 PR API에는 사용 가능한 인증 경로를 확보하지 못했다. 인증 값은 출력·저장하지 않았다. 이는 자동 승인 거절이 아니라 GitHub API 요청 실패다.
+
+위 PR 생성 화면은 기존 PR 주소가 아니다. 사용자가 GitHub에 로그인해 비교 내용을 확인한 뒤 제목과 본문을 입력하고 Draft PR을 만들 수 있다. 제목 권장값: **상품 검토·시즌 추천 기반 및 즐겨찾기 상품 가져오기 추가**. 요지는 현재 페이지 자료를 사용자 확인 후 파일로 전달해 검토·권한 확인·보관함 저장으로 연결하는 기능이며, 실제 운영 페이지와 Windows는 미검증임을 본문에 남긴다.
 
 
 ## 변경 파일 전체 목록 (33개)

@@ -27,11 +27,13 @@ winget install --exact --id Gyan.FFmpeg
 
 **쉬운 방법: ZIP 사용**
 
-이 작업에서 제공한 `clipforge-review-source.zip`을 내려받아 압축을 푼다. 기존 프로그램 폴더를 덮어쓰지 않는다. 파일 안에 `package.json`과 `pnpm-lock.yaml`이 있는 `clipforge` 폴더를 사용한다. GitHub 인증 문제로 푸시되지 않은 경우에는 GitHub의 기존 main ZIP 대신 이 파일을 사용해야 변경 사항이 포함된다.
+[이번 기능이 들어 있는 GitHub 브랜치 ZIP 받기](https://github.com/omok424642-lgtm/clipforge/archive/refs/heads/feat/reviewed-browser-product-import.zip)
+
+위 GitHub ZIP 또는 이 작업에서 제공한 `clipforge-review-source.zip`을 내려받아 압축을 푼다. GitHub ZIP의 최상위 폴더 이름은 다를 수 있다. 기존 프로그램 폴더를 덮어쓰지 않는다. 파일 안에 `package.json`과 `pnpm-lock.yaml`이 있는 `clipforge` 폴더를 사용한다. GitHub 인증 문제로 푸시되지 않은 경우에는 GitHub의 기존 main ZIP 대신 이 파일을 사용해야 변경 사항이 포함된다.
 
 **Git을 사용하는 경우**
 
-아래 명령은 브랜치가 GitHub에 **푸시된 후에만** 사용할 수 있다. 현재 반영 여부는 이 작업의 마지막 보고를 확인한다. 푸시가 안 된 상태에서는 ZIP을 사용한다.
+2026-10-28 이 브랜치는 GitHub에 푸시되었다. Git이 설치되어 있다면 아래 명령으로 받을 수 있다. main 병합이나 PR 생성 완료를 뜻하지 않는다.
 
 ```bat
 git clone --branch feat/reviewed-browser-product-import --single-branch https://github.com/omok424642-lgtm/clipforge.git clipforge-browser-test

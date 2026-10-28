@@ -106,6 +106,7 @@ export default function CommerceImportPage() {
         <BrowserCollectionDiagnosticsView diagnostics={draft.browserMaterials.diagnostics} />
         <h3 className="font-semibold">브라우저에서 확인한 원본 자료 (검증·AI 분석 전)</h3>
         <p>브랜드: {draft.browserMaterials.brand || "미확인"} · 평점: {draft.browserMaterials.rating || "미확인"}</p>
+        <p>전체 리뷰 수: {draft.browserMaterials.reviewCount || "미확인"} · 확보한 구매평 본문 {draft.browserMaterials.reviews.length}개 (리뷰 수가 곧 수집한 본문 수는 아닙니다)</p>
         <p>상품 소개 영상: {draft.browserMaterials.videoPresent ? "페이지에 영상 요소 있음 · 재생·다운로드·편집 권한 미확인" : "미확인"}</p>
         <p>이 범위만 수집: {draft.browserMaterials.scope}. 다른 옵션에서도 동일한 사양·리뷰인지는 미확인입니다.</p>
         <details><summary>표시된 구매평 {draft.browserMaterials.reviews.length}개 · 광고 전재 금지</summary>{draft.browserMaterials.reviews.map((r, i) => <p className="my-2 whitespace-pre-wrap" key={i}>{r}</p>)}</details>
@@ -123,6 +124,8 @@ export default function CommerceImportPage() {
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={image.url} alt={`상품 이미지 ${i + 1}`} referrerPolicy="no-referrer" className="aspect-square w-full object-contain" />
             <p className="text-xs">{image.provenance === "user" ? "직접 업로드" : "수집 이미지 · 권한 확인 필요"}</p>
+            <p className="text-xs">{{ primary: "대표 이미지", additional: "추가 이미지", detail: "상세페이지 이미지", unclassified: "구분 미확인" }[draft.browserMaterials?.imageAssets?.find(a => a.url === (image.originImageUrl || image.url))?.role || "unclassified"]} · 옵션 일치 미확인</p>
+            <p className="text-xs">{{ corroborated: "복수 단서 일치 · 원본 확인 필요", candidate: "후보 · 원본 비교 필요", user_provided: "사용자 보완 · 자동 수집 아님", unconfirmed: "신뢰 상태 미확인" }[draft.browserMaterials?.imageAssets?.find(a => a.url === (image.originImageUrl || image.url))?.confidence || "unconfirmed"]}</p>
             <p className="break-all text-xs text-muted-foreground">출처: {image.sourceUrl}</p>
             <Button variant="outline" type="button" onClick={() => patch({ images: draft.images.filter((_, index) => index !== i) })}>이 이미지 제외</Button>
           </div>)}</div>

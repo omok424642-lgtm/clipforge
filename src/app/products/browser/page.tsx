@@ -29,7 +29,7 @@ export default function BrowserImportPage() {
   };
   const edit = (value: Partial<BrowserProductMaterials>) => {
     if (!material) return;
-    const updated = { ...material, ...value, diagnostics: material.diagnostics && { ...material.diagnostics, fields: material.diagnostics.fields.map(f => Object.hasOwn(value, f.name) ? { ...f, method: "user_edit" as const } : f) } }; setMaterial(updated); setRaw(JSON.stringify(updated, null, 2)); setConfirmed(false);
+    const updated = { ...material, ...value, diagnostics: material.diagnostics && { ...material.diagnostics, fields: material.diagnostics.fields.map(f => Object.hasOwn(value, f.name) ? { ...f, method: "user_edit" as const, path: "manual" as const, confidence: "user_provided" as const } : f) } }; setMaterial(updated); setRaw(JSON.stringify(updated, null, 2)); setConfirmed(false);
   };
   const send = async () => {
     if (!material || !confirmed) return;
@@ -52,7 +52,7 @@ export default function BrowserImportPage() {
       <details><summary>수동 등록용 코드</summary><textarea aria-label="북마클릿 코드" readOnly value={code} className="h-32 w-full border p-2" /></details>
       <p>네이버 스마트스토어·브랜드스토어 또는 쿠팡 상품 페이지에서 옵션을 선택하고 필요한 상세정보·구매평을 직접 펼친 뒤 버튼을 누르세요. 표시된 내용과 이미지를 확인하고 개인정보를 지운 후 자료 파일을 저장하세요.</p>
       <p className="text-sm">페이지 구조 변경·접근 제한·iframe·보안 정책으로 일부 항목이나 버튼이 작동하지 않을 수 있습니다. 제한은 우회하지 않습니다. 그때는 아래에 직접 자료를 입력하거나 기존 상품 가져오기 화면에서 보완하세요. 반복 실행·자동 스크롤·다른 리뷰 페이지 조회는 하지 않습니다.</p>
-      <p>상품명·가격이 비면 페이지 수집 진단을 확인하고 ‘현재 페이지 다시 읽기’를 누르세요. 화면에 자료가 있는데도 비면 ‘화면 글자 직접 선택’ 또는 ‘화면 이미지 직접 선택’으로 보완할 수 있습니다. 진단 파일에는 페이지 HTML·상품 본문·작성자·쿠키를 넣지 않습니다.</p>
+      <p>자동 추출은 상품 제목·판매가·구매 버튼·상품 이미지의 복수 단서를 조사합니다. 자동 결과가 비면 진단을 확인하고 ‘현재 페이지 다시 읽기’를 누르세요. 직접 선택은 예외 보조 수단이며 자동 수집 성공으로 표시하지 않습니다. 진단 파일에는 상품 본문·HTML·작성자·쿠키를 넣지 않습니다.</p>
       <details><summary>저장한 진단 파일만 열어 보기 (서버 전송 없음)</summary>
         <input aria-label="진단 파일" type="file" accept="application/json,.json" onChange={async e => {
           const file = e.target.files?.[0]; if (!file) return;
@@ -77,8 +77,9 @@ export default function BrowserImportPage() {
         <BrowserCollectionDiagnosticsView diagnostics={material.diagnostics} />
         <p>출처: {material.sourceUrl}</p><p>수집 시각: {new Date(material.collectedAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })} (한국 시간)</p>
         <p>상품명: {material.title || "미확인"} / 가격: {material.price || "미확인"} / 브랜드: {material.brand || "미확인"}</p>
-        {([['상품명', 'title'], ['가격', 'price'], ['브랜드', 'brand'], ['현재 선택 옵션 (한 줄에 하나)', 'options'], ['상품 상세설명', 'description'], ['제품 사양 (한 줄에 하나)', 'specifications'], ['구매평 (한 줄에 하나, 개인정보·안내 문구 제거)', 'reviews'], ['평점', 'rating']] as const).map(([label, key]) => <label className="block" key={key}>{label}<textarea aria-label={label} placeholder="미확인 — 직접 보완해 주세요" className="block min-h-16 w-full rounded border p-2" value={Array.isArray(material[key]) ? (material[key] as string[]).join("\n") : material[key]} onChange={e => edit({ [key]: Array.isArray(material[key]) ? e.target.value.split("\n") : e.target.value })} /></label>)}
+        {([['상품명', 'title'], ['가격', 'price'], ['브랜드', 'brand'], ['현재 선택 옵션 (한 줄에 하나)', 'options'], ['상품 상세설명', 'description'], ['제품 사양 (한 줄에 하나)', 'specifications'], ['구매평 (한 줄에 하나, 개인정보·안내 문구 제거)', 'reviews'], ['평점', 'rating'], ['전체 리뷰 수 (구매평 본문 수 아님)', 'reviewCount']] as const).map(([label, key]) => <label className="block" key={key}>{label}<textarea aria-label={label} placeholder="미확인 — 직접 보완해 주세요" className="block min-h-16 w-full rounded border p-2" value={Array.isArray(material[key]) ? (material[key] as string[]).join("\n") : material[key] || ""} onChange={e => edit({ [key]: Array.isArray(material[key]) ? e.target.value.split("\n") : e.target.value })} /></label>)}
         <p>현재 옵션: {material.options.join(" / ") || "미확인"} · 평점: {material.rating || "미확인"}</p>
+        <p>전체 리뷰 수: {material.reviewCount || "미확인"} · 가져온 구매평 본문: {material.reviews.length}개 (서로 다른 항목입니다)</p>
         <p className="whitespace-pre-wrap">설명: {material.description || "미확인"}</p><p>사양: {material.specifications.join(" / ") || "미확인"}</p>
         <p>영상: {material.videoPresent ? "요소 있음 · 접근 가능 여부 및 사용 권한 미확인" : "미확인"}. 이 기능은 영상을 다운로드하지 않습니다. 권한이 확인된 영상 파일은 기존 제작 화면의 로컬 자료 추가를 이용하세요.</p>
         <p>구매평·평점은 상품 단위 자료이며 선택 옵션과 일치하는지 미확인입니다. 옵션별 제품 사양에 합치거나 광고 근거로 자동 사용하지 않습니다.</p>
@@ -89,6 +90,8 @@ export default function BrowserImportPage() {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           {preview && <img src={url} alt="상품 이미지 미리보기" referrerPolicy="no-referrer" className="h-32 w-full object-contain" />}
           <p>{url}</p>
+          <p>{{ primary: "대표 이미지", additional: "추가 이미지", detail: "상세페이지 이미지", unclassified: "구분 미확인" }[material.imageAssets?.find(a => a.url === url)?.role || "unclassified"]} · 옵션 일치 미확인</p>
+          <p>{{ corroborated: "복수 단서 일치 · 원본 확인 필요", candidate: "후보 · 원본 비교 필요", user_provided: "사용자 보완 · 자동 수집 아님", unconfirmed: "신뢰 상태 미확인" }[material.imageAssets?.find(a => a.url === url)?.confidence || "unconfirmed"]}</p>
         </label>)}</div>
         <label className="block">원본 제휴 링크 보존 (선택)<input type="url" value={affiliate} onChange={e => { setAffiliate(e.target.value); setConfirmed(false); }} className="block w-full rounded border p-2" /></label>
         <p>제휴 링크는 상품 페이지에서 역으로 알아낼 수 없습니다. 본인이 발급받은 원본을 입력하고 같은 상품인지 확인하세요. 모든 원본 항목은 위 출처·수집 시각을 공유하며 광고·AI 사용 권한은 미확인 상태로 보존됩니다.</p>

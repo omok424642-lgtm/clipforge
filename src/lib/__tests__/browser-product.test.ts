@@ -42,8 +42,9 @@ function page(url: string, html: string) {
   Object.defineProperty(w.HTMLElement.prototype, "innerText", { get() { return this.textContent; } });
   w.Element.prototype.getClientRects = function () { return (this.tagName === "OPTION" || this.closest('[hidden],[style="display:none"]') ? [] : [{}]) as unknown as DOMRectList; };
   w.Element.prototype.getBoundingClientRect = function () {
-    const top = this.hasAttribute("data-offscreen") ? 5000 : 20;
-    return { x: 20, y: top, top, bottom: top + 100, left: 20, right: 220, width: 200, height: 100, toJSON() {} };
+    const top = this.hasAttribute("data-offscreen") ? 5000 : Number(this.getAttribute("data-y") || 20);
+    const width = Number(this.getAttribute("data-width") || 200), height = Number(this.getAttribute("data-height") || 100), left = Number(this.getAttribute("data-x") || 20);
+    return { x: left, y: top, top, bottom: top + height, left, right: left + width, width, height, toJSON() {} };
   };
   Object.defineProperty(w.HTMLImageElement.prototype, "complete", { get() { return !this.hasAttribute("data-pending"); } });
   Object.defineProperty(w.HTMLImageElement.prototype, "naturalWidth", { get() { return this.hasAttribute("data-pending") || this.hasAttribute("data-broken") ? 0 : 100; } });
@@ -59,9 +60,9 @@ function page(url: string, html: string) {
 
 describe("independent rendered-page bookmarklet", () => {
   it("extracts Coupang fields without fetching, reading reviewer names or unrelated page text", () => {
-    const p = page(sample().sourceUrl, `<h1 class="prod-buy-header__title">컵</h1><div class="total-price"><strong>1000원</strong></div><div class="prod-option"><select><option selected>블랙</option><option>화이트</option></select></div><div class="prod-image"><img src="https://thumbnail.coupangcdn.com/a.jpg"></div><div class="product-detail"><img src="https://thumbnail.coupangcdn.com/a.jpg"><video></video></div><span class="review-author">홍길동</span><div class="sdp-review__article__list__review__content">쓰기 편해요</div><div class="sdp-review__article__list__review__content">쓰기 편해요</div><div hidden class="sdp-review__article__list__review__content">숨김 리뷰</div><p>배송 안내</p>`);
+    const p = page(sample().sourceUrl, `<h1 class="prod-buy-header__title">컵</h1><div class="total-price"><strong>1000원</strong></div><div class="prod-option"><select><option selected>블랙</option><option>화이트</option></select></div><div class="prod-image"><img src="https://thumbnail.coupangcdn.com/a.jpg"></div><div class="product-detail"><img src="https://thumbnail.coupangcdn.com/a.jpg"><video></video></div><button role="tab" aria-selected="true" aria-controls="reviews-cp">리뷰</button><section id="reviews-cp"><span class="review-author">홍길동</span><div class="sdp-review__article__list__review__content">쓰기 편해요</div><div class="sdp-review__article__list__review__content">쓰기 편해요</div><div hidden class="sdp-review__article__list__review__content">숨김 리뷰</div><p>배송 안내</p></section>`);
     const data = JSON.parse((p.root!.querySelector("textarea[data-clipforge-snapshot]") as HTMLTextAreaElement).value);
-    expect(data.title).toBe("컵"); expect(data.price).toBe("1000원"); expect(data.options).toEqual(["블랙"]);
+    expect(data.title).toBe("컵"); expect(data.price).toBe("1,000원"); expect(data.options).toEqual(["블랙"]);
     expect(data.images).toHaveLength(1); expect(data.reviews).toEqual(["쓰기 편해요"]); expect(data.videoPresent).toBe(true);
     expect(JSON.stringify(data)).not.toMatch(/홍길동|배송 안내|숨김 리뷰|화이트/);
     expect(p.fetch).not.toHaveBeenCalled();
@@ -69,7 +70,7 @@ describe("independent rendered-page bookmarklet", () => {
     p.dom.window.close();
   });
   it("supports Naver independently and never fills missing fields from body text", () => {
-    const p = page("https://smartstore.naver.com/shop/products/123", `<div data-shp-area="top"><h3>네이버 컵</h3><span itemprop="price">2000원</span></div><div id="INTRODUCE"><p>스테인리스</p><img src="https://shop-phinf.pstatic.net/1.jpg"></div><div data-shp-area="review"><span data-review-content>가벼워요</span></div><div>별점 5점 브랜드 이름 로그인 이름</div>`);
+    const p = page("https://smartstore.naver.com/shop/products/123", `<div data-shp-area="top"><h3>네이버 컵</h3><span itemprop="price">2000원</span></div><div id="INTRODUCE"><p>스테인리스</p><img src="https://shop-phinf.pstatic.net/1.jpg"></div><button role="tab" aria-selected="true" aria-controls="review-pane">리뷰</button><div id="review-pane" data-shp-area="review"><span data-review-content>가벼워요</span></div><div>별점 5점 브랜드 이름 로그인 이름</div>`);
     const data = JSON.parse((p.root!.querySelector("textarea[data-clipforge-snapshot]") as HTMLTextAreaElement).value);
     expect(data.title).toBe("네이버 컵"); expect(data.description).toBe("스테인리스"); expect(data.brand).toBe(""); expect(data.rating).toBe(""); expect(data.reviews).toEqual(["가벼워요"]);
     p.dom.window.close();
@@ -134,14 +135,14 @@ describe("diagnosing unsupported live-page structures without private state", ()
     expect(JSON.stringify(s)).not.toMatch(/비공개 상품|secret|화면 밖 후기|숨김 후기/); expect(p.fetch).not.toHaveBeenCalled(); p.dom.window.close();
   });
   it("collects only explicit on-screen review bodies, not authors, guidance or recommendation cards", () => {
-    const p = page(liveUrl, '<div data-shp-area="review"><span>홍길동</span><p data-review-content>사용하기 편해요</p><p data-review-content>사용하기 편해요</p><aside><p data-review-content>다른 상품 광고</p></aside><p data-review-content style="opacity:0">투명 후기</p></div><div class="recommend"><h1 itemprop="name">추천 상품</h1></div>');
+    const p = page(liveUrl, '<button role="tab" aria-selected="true" aria-controls="review-pane">리뷰</button><div id="review-pane" data-shp-area="review"><span>홍길동</span><p data-review-content>사용하기 편해요</p><p data-review-content>사용하기 편해요</p><aside><p data-review-content>다른 상품 광고</p></aside><p data-review-content style="opacity:0">투명 후기</p></div><div class="recommend"><h1 itemprop="name">추천 상품</h1></div>');
     const s = snapshot(p); expect(s.reviews).toEqual(["사용하기 편해요"]); expect(s.title).toBe("");
     expect(JSON.stringify(s)).not.toMatch(/홍길동|다른 상품 광고|투명 후기|추천 상품/); p.dom.window.close();
   });
   it("reports loading, missing selectors and frames with actions instead of success", () => {
     const p = page(liveUrl, '<h2>안내</h2><iframe></iframe>');
     expect(snapshot(p).title).toBe(""); expect(snapshot(p).diagnostics.counts.frames).toBe(1);
-    expect(p.root!.textContent).toContain("페이지 구조"); expect(p.root!.textContent).toContain("로딩"); expect(p.root!.textContent).toContain("iframe");
+    expect(p.root!.textContent).toContain("상품 영역 단서"); expect(p.root!.textContent).toContain("로딩"); expect(p.root!.textContent).toContain("iframe");
     expect(p.root!.textContent).toContain("직접 선택"); p.dom.window.close();
   });
   it("does not turn an access-check page into a product", () => {
@@ -202,11 +203,117 @@ describe("diagnosing unsupported live-page structures without private state", ()
     const p = page(liveUrl, publicHead);
     const safe = parseBrowserDiagnostics({ ...snapshot(p).diagnostics, html: '<div>개인정보</div>', cookie: 'secret', sourceUrl: 'https://private/token', counts: { ...snapshot(p).diagnostics.counts, private: 'secret', frames: -5 } });
     expect(JSON.stringify(safe)).not.toMatch(/개인정보|secret|private|token/); expect(safe!.counts.frames).toBe(0);
-    const material = parseBrowserProduct(snapshot(p)); expect(material.diagnostics!.collectorVersion).toBe('2026-10-28.2');
+    const material = parseBrowserProduct(snapshot(p)); expect(material.diagnostics!.collectorVersion).toBe('2026-10-28.3');
     expect(parseBrowserDiagnostics({ collectorVersion: 'injected-private-text' })).toBeUndefined(); p.dom.window.close();
   });
   it("does not attach diagnostics from a different product to a material snapshot", () => {
     const p = page(liveUrl, publicHead);
     expect(parseBrowserProduct({ ...sample(), diagnostics: snapshot(p).diagnostics }).diagnostics).toBeUndefined(); p.dom.window.close();
+  });
+});
+
+// Deliberately no main/#content, legacy product selectors, CSS names or metadata.
+// Values differ from the user's live expectations; no live HTML was retrieved.
+function automaticFixture(name = "테스트 무선 전기포트", price = "53,700", extra = "", caption = "예제 전문점") {
+  return `<title>${caption}</title><div class="opaque-layout">
+    <div class="opaque-gallery"><img id="hero" data-width="300" data-height="300" data-x="20" data-y="100" src="https://shop-phinf.pstatic.net/hero.jpg"><img data-width="60" data-height="60" data-y="450" src="https://shop-phinf.pstatic.net/side.jpg"></div>
+    <div class="opaque-buy"><h3>${name}</h3><div>판매가 <strong>${price}원</strong></div><div>카드 혜택 <strong>41,200원</strong></div><div>쿠폰 적용 <strong>40,100원</strong></div><div>배송비 <strong>3,200원</strong></div><div>포인트 적립 <strong>2,000원</strong></div><p>평점 4.63점 <a role="tab">리뷰 1,278건</a></p><button>구매하기</button>${extra}</div>
+  </div>`;
+}
+
+describe("automatic product-region extraction, with zero manual selection", () => {
+  it.each([["테스트 무선 전기포트", "53,700"], ["예제 실리콘 주방 집게", "18,250"], ["테스트 카드 보관 지갑", "27,800"]])("automatically extracts %s from generic rendered structure", (name, price) => {
+    const p = page(liveUrl, automaticFixture(name, price)); const s = snapshot(p);
+    expect(s.title).toBe(name); expect(s.price).toBe(price + "원");
+    expect(s.diagnostics.counts.titleMatches).toBe(0); expect(s.diagnostics.counts.priceMatches).toBe(0); expect(s.diagnostics.counts.metadataTags).toBe(0);
+    expect(s.diagnostics.counts.productRegions).toBe(1); expect(s.diagnostics.counts.excludedBenefitPrices).toBeGreaterThan(0);
+    expect(s.diagnostics.counts.autoTitle).toBe(1); expect(s.diagnostics.counts.autoPrice).toBe(1); expect(s.diagnostics.counts.autoPrimaryImage).toBe(1);
+    expect(s.imageAssets.find((a: {role: string}) => a.role === 'primary').url).toContain('/hero.jpg');
+    expect(s.imageAssets.find((a: {role: string}) => a.role === 'additional').url).toContain('/side.jpg');
+    expect(s.options).toEqual([]); expect(s.reviews).toEqual([]); expect(p.fetch).not.toHaveBeenCalled(); p.dom.window.close();
+  });
+  it("separates overall rating and review count from actual review bodies", () => {
+    const p = page(liveUrl, automaticFixture()); const s = snapshot(p);
+    expect(s.rating).toBe('4.63'); expect(s.reviewCount).toBe('1,278건'); expect(s.reviews).toEqual([]);
+    expect(s.diagnostics.counts.reviewTabOpen).toBe(0); expect(s.diagnostics.counts.visibleReviews).toBe(0); p.dom.window.close();
+  });
+  it("does not read a review body until the review tab is explicitly open", () => {
+    const p = page(liveUrl, automaticFixture() + '<nav><button role="tab" aria-selected="false" aria-controls="open-reviews" id="review-tab">리뷰</button></nav><section id="open-reviews"><div data-shp-area="review"><p data-review-content>예제의 실제 리뷰 본문</p></div></section>');
+    expect(snapshot(p).reviews).toEqual([]);
+    p.w.document.getElementById('review-tab')!.setAttribute('aria-selected','true'); button(p,'현재 페이지 다시 읽기').click();
+    expect(snapshot(p).reviews).toEqual(['예제의 실제 리뷰 본문']); expect(snapshot(p).diagnostics.counts.reviewTabOpen).toBe(1); p.dom.window.close();
+  });
+  it("handles styled product text even without a heading tag or named container", () => {
+    const p = page(liveUrl, automaticFixture().replace('<h3>테스트 무선 전기포트</h3>', '<div style="font-size:24px;font-weight:700">테스트 무선 전기포트</div>'));
+    expect(snapshot(p).title).toBe('테스트 무선 전기포트'); expect(snapshot(p).price).toBe('53,700원'); p.dom.window.close();
+  });
+  it("corroborates a displayed heading against the browser caption without OG metadata", () => {
+    const p = page(liveUrl, automaticFixture('테스트 보온 물병','35,400','', '테스트 보온 물병 : 예제점').replace('<button>구매하기</button>',''));
+    expect(snapshot(p).title).toBe('테스트 보온 물병'); expect(snapshot(p).diagnostics.counts.purchaseControls).toBe(0); expect(snapshot(p).price).toBe('35,400원'); p.dom.window.close();
+  });
+  it("uses the labelled price, photo and rating summary when even the purchase control is nonstandard", () => {
+    const p = page(liveUrl, automaticFixture().replace('<button>구매하기</button>','<button>Npay로 주문</button>'));
+    expect(snapshot(p).title).toBe('테스트 무선 전기포트'); expect(snapshot(p).price).toBe('53,700원'); expect(snapshot(p).diagnostics.counts.autoPrimaryImage).toBe(1); p.dom.window.close();
+  });
+  it("reads a visible emphasized number and sibling currency without a price class", () => {
+    const p = page(liveUrl, automaticFixture().replace('<div>판매가 <strong>53,700원</strong></div>','<div><strong>53,700</strong><span>원</span></div>'));
+    expect(snapshot(p).price).toBe('53,700원'); expect(snapshot(p).title).toBe('테스트 무선 전기포트'); p.dom.window.close();
+  });
+  it("rejects competing sale-price candidates instead of choosing the minimum", () => {
+    const p = page(liveUrl, automaticFixture().replace('<div>카드 혜택 <strong>41,200원</strong></div>','<div>할인가 <strong>41,200원</strong></div>'));
+    expect(snapshot(p).price).toBe(''); expect(snapshot(p).diagnostics.counts.ambiguousPrices).toBe(1); p.dom.window.close();
+  });
+  it("does not mistake recommendation links, ads, benefits or struck original prices for the product", () => {
+    const other = '<a href="https://smartstore.naver.com/other/products/999"><h1>다른 추천 상품 이름</h1><strong>7,200원</strong><button>구매하기</button><img data-width="500" data-height="500" src="https://shop-phinf.pstatic.net/foreign.jpg"></a>';
+    const p = page(liveUrl, other + automaticFixture('테스트 무선 전기포트','53,700','<del>원래 가격 80,000원</del>'));
+    expect(snapshot(p).title).toBe('테스트 무선 전기포트'); expect(snapshot(p).price).toBe('53,700원'); expect(JSON.stringify(snapshot(p).imageAssets)).not.toContain('foreign.jpg'); p.dom.window.close();
+  });
+  it("classifies primary, gallery and visible detail images separately", () => {
+    const p = page(liveUrl, automaticFixture() + '<section><h2>상품 상세설명</h2><img data-width="300" data-height="400" data-y="300" src="https://shop-phinf.pstatic.net/detail.jpg"></section>');
+    expect(snapshot(p).imageAssets.map((a: {role: string}) => a.role)).toEqual(['primary','additional','detail']); p.dom.window.close();
+  });
+  it("does not choose a larger advertisement image linked to another destination", () => {
+    const p = page(liveUrl, automaticFixture() + '<a href="https://ads.example.org/campaign"><img data-width="450" data-height="450" src="https://shop-phinf.pstatic.net/ad.jpg"></a>');
+    expect(snapshot(p).imageAssets.find((a: {role: string})=>a.role==='primary').url).toContain('/hero.jpg'); expect(JSON.stringify(snapshot(p).imageAssets)).not.toContain('/ad.jpg'); p.dom.window.close();
+  });
+  it("separates Coupang summary counts from bodies while its review tab is closed", () => {
+    const p = page(sample().sourceUrl, '<button id="tab" role="tab" aria-selected="false" aria-controls="cp-reviews">리뷰</button><section id="cp-reviews"><p class="sdp-review__article__list__review__content">공개된 예제 본문</p></section>');
+    expect(snapshot(p).reviews).toEqual([]); p.w.document.getElementById('tab')!.setAttribute('aria-selected','true'); button(p,'현재 페이지 다시 읽기').click(); expect(snapshot(p).reviews).toEqual(['공개된 예제 본문']); p.dom.window.close();
+  });
+  it("leaves arbitrary option controls unconfirmed, reading only labelled selected product controls", () => {
+    const p = page(liveUrl, automaticFixture('테스트 무선 전기포트','53,700','<select><option selected>추천순</option></select><button aria-selected="true">상세정보</button>'));
+    expect(snapshot(p).options).toEqual([]); p.dom.window.close();
+    const q = page(liveUrl, automaticFixture('테스트 무선 전기포트','53,700','<select aria-label="색상 옵션"><option selected>파랑</option><option>빨강</option></select>'));
+    expect(snapshot(q).options).toEqual(['파랑']); expect(snapshot(q).diagnostics.fields.find((f: {name: string}) => f.name==='options').path).toBe('selected_control'); q.dom.window.close();
+  });
+  it("never marks manual supplementation as automatic success", () => {
+    const p = page(liveUrl,'<p id="chosen">사용자가 보완한 상품명</p>');
+    button(p,'화면 글자 직접 선택').click(); p.w.getSelection=()=>({rangeCount:1,getRangeAt:()=>({commonAncestorContainer:p.w.document.getElementById('chosen')!.firstChild}),toString:()=> '사용자가 보완한 상품명'}); button(p,'선택한 글자 적용').click();
+    expect(snapshot(p).title).toBe('사용자가 보완한 상품명'); expect(snapshot(p).diagnostics.counts.autoTitle).toBe(0);
+    expect(snapshot(p).diagnostics.fields.find((f: {name: string})=>f.name==='title').confidence).toBe('user_provided'); p.dom.window.close();
+  });
+  it("reads only the visible body of a dated rated review card after the tab is opened", () => {
+    const body = '일상에서 사용하기 편하고 손잡이가 안정적으로 느껴졌습니다.';
+    const p = page(liveUrl, automaticFixture() + `<button role="tab" aria-selected="true" aria-controls="plain-reviews">리뷰</button><section id="plain-reviews"><article><p>날짜 앞의 길게 표시된 작성자 소개는 리뷰 본문이 아닙니다.</p><span class="author">홍길동</span><time>2026.10.20.</time><span aria-label="평점 4점">별점</span><p>${body}</p><p>이 리뷰가 도움이 되셨나요? 상품 정보가 아닌 일반 안내입니다.</p><p class="option">선택한 옵션은 고객 개인 선택 정보이므로 본문과 분리합니다.</p></article></section>`);
+    expect(snapshot(p).reviews).toEqual([body]); expect(JSON.stringify(snapshot(p))).not.toContain('홍길동'); p.dom.window.close();
+  });
+  it("recognizes an open review heading and sorting controls without review classes or tab attributes", () => {
+    const body='실제로 사용해 본 예제 본문이며 손잡이와 크기가 편하게 느껴졌습니다.';
+    const p=page(liveUrl,automaticFixture()+`<section><h2>전체 리뷰</h2><button>최신순</button><article><time>2026.10.20.</time><span aria-label="평점 4점">별점</span><p>${body}</p></article></section>`);
+    expect(snapshot(p).reviews).toEqual([body]); expect(snapshot(p).diagnostics.counts.reviewTabOpen).toBe(1); p.dom.window.close();
+  });
+  it("does not collect account-header or editable draft text as a product title", () => {
+    const p = page(liveUrl, '<header><h1>개인 계정 이름은 수집하지 않음</h1></header>' + automaticFixture() + '<div contenteditable="true" style="font-size:30px;font-weight:bold">전송 전 개인 리뷰 초안</div>');
+    expect(snapshot(p).title).toBe('테스트 무선 전기포트'); expect(JSON.stringify(snapshot(p))).not.toMatch(/개인 계정|개인 리뷰 초안/); p.dom.window.close();
+  });
+  it("does not invent automatic-success counters for an old diagnostic", () => {
+    const diagnostic = parseBrowserDiagnostics({ collectorVersion:'2026-10-28.2',platform:'naver',productId:'123',counts:{ titleMatches:1 },fields:[] });
+    expect(diagnostic!.automaticAssessmentRecorded).toBe(false);
+    expect(parseBrowserDiagnostics(diagnostic)!.automaticAssessmentRecorded).toBe(false);
+  });
+  it("ignores unattached image roles and invalid confidence claims", () => {
+    const url = sample().images[0];
+    const material = parseBrowserProduct({ ...sample(), imageAssets: [{url,role:'primary',confidence:'verified'},{url:'https://evil.test/private.jpg',role:'detail',confidence:'corroborated'}] });
+    expect(material.imageAssets).toEqual([{url,role:'primary',confidence:'unconfirmed'}]);
   });
 });

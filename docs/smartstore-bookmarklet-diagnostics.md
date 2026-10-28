@@ -1,5 +1,7 @@
 # 스마트스토어 상품 가져오기 실패: 진단과 재테스트
 
+이 문서는 이전 v2026-10-28.2 기록이다. 현재 v2026-10-28.3의 자동 추출 변경과 직접 선택 없이 확인하는 절차는 [자동 추출 안내](smartstore-automatic-extraction.md)를 따른다.
+
 대상 제보 주소: https://smartstore.naver.com/sunnycook1/products/11424220493
 
 ## 확인한 사실과 확인하지 못한 사실

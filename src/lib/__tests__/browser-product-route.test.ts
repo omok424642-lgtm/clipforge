@@ -30,4 +30,12 @@ describe("confirmed browser import API", () => {
   it("rejects over-size payloads", async () => {
     expect((await POST(request({ action: "browser_import", x: "a".repeat(200001) }))).status).toBe(413);
   });
+  it("persists image grouping and review count separately with an immutable original image URL", async () => {
+    const url = 'https://thumbnail.coupangcdn.com/example.jpg';
+    const r = await POST(request({ action: 'browser_import', confirmed: true, material: { ...material, images: [url], imageAssets: [{ url, role: 'primary', confidence: 'candidate' }], reviewCount: '219건' } }));
+    const { draft } = await r.json(); expect(r.status).toBe(200);
+    expect(draft.images[0].originImageUrl).toBe(url); expect(draft.browserMaterials.imageAssets[0].role).toBe('primary');
+    expect(draft.browserMaterials.reviewCount).toBe('219건'); expect(draft.browserMaterials.reviews).toEqual(['좋아요']);
+    expect(collectCommerceProduct).not.toHaveBeenCalled();
+  });
 });

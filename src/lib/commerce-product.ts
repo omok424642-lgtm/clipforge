@@ -12,6 +12,8 @@ export interface CommerceLink {
 export interface CommerceImage {
   url: string;
   sourceUrl: string;
+  /** Preserve browser-image role attribution after the retained URL becomes local. */
+  originImageUrl?: string;
   provenance: CollectionMethod | "user";
 }
 export interface CommerceProductDraft {

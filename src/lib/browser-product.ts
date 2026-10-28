@@ -1,6 +1,10 @@
 import { allowedCommerceImage, classifyCommerceLink, cleanProductText } from "./commerce-product";
 
-export const BROWSER_FIELDS = ["title", "price", "brand", "options", "description", "specifications", "reviews", "rating", "images"] as const;
+export const BROWSER_FIELDS = ["title", "price", "brand", "options", "description", "specifications", "reviews", "rating", "reviewCount", "images"] as const;
+export const BROWSER_COUNTERS = ["metadataTags", "titleMatches", "priceMatches", "detailRoots", "reviewMatches", "visibleReviews", "visibleImages", "productImages", "frames", "readableFrames", "headingCandidates", "purchaseControls", "productRegions", "ambiguousRegions", "moneyCandidates", "excludedBenefitPrices", "ambiguousPrices", "supportedVisibleImages", "imageHostRejected", "imageScopeRejected", "primaryImages", "additionalImages", "detailImages", "reviewTabOpen", "autoTitle", "autoPrice", "autoPrimaryImage", "rawHeadingElements", "visibleCurrencyNodes"] as const;
+export const BROWSER_PATHS = ["legacy_selector", "metadata", "caption_heading", "product_region", "sale_price", "product_summary", "review_tab", "selected_control", "manual", "unconfirmed"] as const;
+export type BrowserConfidence = "corroborated" | "candidate" | "user_provided" | "unconfirmed";
+export interface BrowserImageAsset { url: string; role: "primary" | "additional" | "detail" | "unclassified"; confidence: BrowserConfidence }
 export type BrowserField = typeof BROWSER_FIELDS[number];
 export type BrowserFieldMethod = "visible_dom" | "public_metadata" | "manual_selection" | "user_edit" | "unconfirmed";
 export interface BrowserCollectionDiagnostics {
@@ -11,8 +15,9 @@ export interface BrowserCollectionDiagnostics {
   topFrame: boolean;
   metadataIdentity: "matched" | "no_identity" | "mismatch";
   blockedPage: boolean;
-  counts: Record<"metadataTags" | "titleMatches" | "priceMatches" | "detailRoots" | "reviewMatches" | "visibleReviews" | "visibleImages" | "productImages" | "frames" | "readableFrames", number>;
-  fields: { name: BrowserField; method: BrowserFieldMethod }[];
+  automaticAssessmentRecorded: boolean;
+  counts: Record<typeof BROWSER_COUNTERS[number], number>;
+  fields: { name: BrowserField; method: BrowserFieldMethod; path: typeof BROWSER_PATHS[number]; confidence: BrowserConfidence }[];
 }
 
 /** A diagnostic is counters/enums only: never accept page HTML, URLs, arbitrary messages or cookies. */
@@ -20,16 +25,22 @@ export function parseBrowserDiagnostics(input: unknown): BrowserCollectionDiagno
   if (!input || typeof input !== "object" || Array.isArray(input)) return undefined;
   const b = input as Record<string, unknown>;
   if (typeof b.collectorVersion !== "string" || !/^\d{4}-\d{2}-\d{2}\.\d{1,3}$/.test(b.collectorVersion) || !["naver", "coupang"].includes(String(b.platform)) || typeof b.productId !== "string" || !/^\d{1,30}$/.test(b.productId)) return undefined;
-  const countKeys = ["metadataTags", "titleMatches", "priceMatches", "detailRoots", "reviewMatches", "visibleReviews", "visibleImages", "productImages", "frames", "readableFrames"] as const;
+  const countKeys = BROWSER_COUNTERS;
   const counts = b.counts && typeof b.counts === "object" ? b.counts as Record<string, unknown> : {};
   const methods = new Set(["visible_dom", "public_metadata", "manual_selection", "user_edit", "unconfirmed"]);
   const sourceFields = Array.isArray(b.fields) ? b.fields.slice(0, 20) : [];
   return {
+    automaticAssessmentRecorded: b.automaticAssessmentRecorded !== false && ["autoTitle", "autoPrice", "autoPrimaryImage"].every(k => Object.hasOwn(counts, k)),
     collectorVersion: b.collectorVersion, platform: b.platform as "naver" | "coupang", productId: b.productId,
     pageState: ["loading", "interactive", "complete"].includes(String(b.pageState)) ? b.pageState as BrowserCollectionDiagnostics["pageState"] : "loading",
     topFrame: b.topFrame === true, metadataIdentity: ["matched", "no_identity", "mismatch"].includes(String(b.metadataIdentity)) ? b.metadataIdentity as BrowserCollectionDiagnostics["metadataIdentity"] : "no_identity", blockedPage: b.blockedPage === true,
     counts: Object.fromEntries(countKeys.map(k => [k, typeof counts[k] === "number" && Number.isInteger(counts[k]) && (counts[k] as number) >= 0 ? Math.min(counts[k] as number, 100000) : 0])) as BrowserCollectionDiagnostics["counts"],
-    fields: BROWSER_FIELDS.map(name => { const f = sourceFields.find(v => v && typeof v === "object" && v.name === name); return { name, method: f && methods.has(f.method) ? f.method as BrowserFieldMethod : "unconfirmed" }; }),
+    fields: BROWSER_FIELDS.map(name => {
+      const f = sourceFields.find(v => v && typeof v === "object" && v.name === name);
+      const method: BrowserFieldMethod = f && methods.has(f.method) ? f.method : "unconfirmed";
+      const manual = method === "manual_selection" || method === "user_edit";
+      return { name, method, path: manual ? "manual" : f && BROWSER_PATHS.includes(f.path) ? f.path : "unconfirmed", confidence: method === "unconfirmed" ? "unconfirmed" : manual ? "user_provided" : f && ["corroborated", "candidate"].includes(f.confidence) ? f.confidence : "candidate" };
+    }),
   };
 }
 
@@ -47,6 +58,8 @@ export interface BrowserProductMaterials {
   images: string[];
   reviews: string[];
   rating: string;
+  reviewCount: string;
+  imageAssets?: BrowserImageAsset[];
   videoPresent: boolean;
   scope: "현재 페이지 · 현재 선택 옵션 · 표시된 자료만";
   reviewOptionMatch: "unconfirmed";
@@ -81,5 +94,10 @@ export function parseBrowserProduct(input: unknown): BrowserProductMaterials {
   }))].slice(0, 10) : [];
   const diagnostic = parseBrowserDiagnostics(b.diagnostics);
   const diagnostics = diagnostic?.platform === link.platform && diagnostic?.productId === link.productId ? diagnostic : undefined;
-  return { version: 1, sourceUrl: link.originalUrl, collectedAt: new Date(b.collectedAt).toISOString(), title: t("title", 300), price: t("price", 100), brand: t("brand", 300), options: list("options", 30, 500), description: t("description", 4000), specifications: list("specifications", 30, 500), images, reviews: list("reviews", 30, 1500), rating: t("rating", 100), videoPresent: b.videoPresent === true, scope: "현재 페이지 · 현재 선택 옵션 · 표시된 자료만", reviewOptionMatch: "unconfirmed", rights: { commercialReuse: "unconfirmed", aiUse: "unconfirmed", videoDownload: "unconfirmed", videoEditing: "unconfirmed" }, diagnostics };
+  const imageAssets: BrowserImageAsset[] = [];
+  if (Array.isArray(b.imageAssets)) for (const asset of b.imageAssets.slice(0, 30)) {
+    if (!asset || typeof asset !== "object" || !images.includes(asset.url) || imageAssets.some(a => a.url === asset.url)) continue;
+    imageAssets.push({ url: asset.url, role: ["primary", "additional", "detail", "unclassified"].includes(asset.role) ? asset.role : "unclassified", confidence: ["corroborated", "candidate", "user_provided", "unconfirmed"].includes(asset.confidence) ? asset.confidence : "unconfirmed" });
+  }
+  return { version: 1, sourceUrl: link.originalUrl, collectedAt: new Date(b.collectedAt).toISOString(), title: t("title", 300), price: t("price", 100), brand: t("brand", 300), options: list("options", 30, 500), description: t("description", 4000), specifications: list("specifications", 30, 500), images, imageAssets, reviews: list("reviews", 30, 1500), rating: t("rating", 100), reviewCount: t("reviewCount", 100), videoPresent: b.videoPresent === true, scope: "현재 페이지 · 현재 선택 옵션 · 표시된 자료만", reviewOptionMatch: "unconfirmed", rights: { commercialReuse: "unconfirmed", aiUse: "unconfirmed", videoDownload: "unconfirmed", videoEditing: "unconfirmed" }, diagnostics };
 }

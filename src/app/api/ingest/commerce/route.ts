@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
         id: randomUUID(), link, resolvedUrl: material.sourceUrl, collectedAt: material.collectedAt,
         method: "browser_page", status: "needs_review", title: material.title, price: material.price,
         options: material.options, features: material.specifications, description: material.description,
-        images: material.images.map(url => ({ url, sourceUrl: material.sourceUrl, provenance: "browser_page" })),
+        images: material.images.map(url => ({ url, originImageUrl: url, sourceUrl: material.sourceUrl, provenance: "browser_page" })),
         browserMaterials: material,
         warnings: ["사용자가 제공한 현재 페이지 자료입니다. 상품·선택 옵션·리뷰 내용의 정확성은 미검증입니다.", "모든 원본 자료의 출처·수집 시각은 아래 상품 주소·수집 시각입니다. 빈 항목은 미확인입니다.", "자료 수집은 광고 재사용·AI 입력 허락이 아닙니다. 이미지는 권한 확인 후 저장하며 영상은 존재 여부만 기록합니다.", "구매평은 표시된 일부 의견입니다. 작성자 정보와 일반 안내 문구가 없는지 확인하세요. 원문을 광고에 전재하지 마세요."],
         disclosure: { enabled: link.kind === "affiliate_or_share", text: link.platform === "naver" ? NAVER_DISCLOSURE : COUPANG_DISCLOSURE, placement: "video_overlay" },

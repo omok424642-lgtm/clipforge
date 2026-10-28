@@ -1,8 +1,8 @@
-export const PRODUCT_BOOKMARKLET_VERSION = "2026-10-28.3";
+export const PRODUCT_BOOKMARKLET_VERSION = "2026-10-28.4";
 
 /** Self-contained: stringified into a bookmark. No requests, private state or frame traversal. */
 export function collectRenderedProductPage() {
-  const version = "2026-10-28.3";
+  const version = "2026-10-28.4";
   const h = location.hostname;
   const naver = /^(?:m\.)?smartstore\.naver\.com$|^brand\.naver\.com$/.test(h) && /^\/[^/]+\/products\/\d+\/?$/.test(location.pathname);
   const coupang = /^(?:www\.|m\.)?coupang\.com$/.test(h) && /^\/(?:vp|vm)\/products\/\d+\/?$/.test(location.pathname);
@@ -177,8 +177,33 @@ export function collectRenderedProductPage() {
     const ambiguous = sorted.length > 1 && sorted[0].score - sorted[1].score < 3;
     return { region: ambiguous ? null : sorted[0] || null, headingCount: headings.length, buyCount: buy.length, ambiguous, moneyCount, excludedMoney, ambiguousMoney };
   }
+  // Follow only explicit same-document relationships. Never click, scroll, fetch or guess hashed classes.
+  const areaKind = (e: Element) => {
+    const value = clean((e as HTMLElement).innerText || '').slice(0, 80).replace(/\s+/g, '');
+    if (/^(?:상품상세(?:정보|설명)?|상세정보|상세설명|상품정보|제품상세)(?:[\d,()건개]*)$/.test(value)) return 'detail';
+    if (/^(?:전체)?(?:리뷰|구매평|상품평)(?:[\d,()건개]*)$/.test(value)) return 'review';
+    return '';
+  };
+  function linkedAreas(kind: 'detail' | 'review') {
+    const result: Element[] = [];
+    for (const control of query(['a[href]', '[aria-controls]', 'button', '[role="tab"]']).slice(0, 3000)) {
+      if ((kind === 'review' && control.getAttribute('aria-selected') === 'false') || !displayed(control) || foreignProduct(control) || control.closest('aside,footer,[class*="recommend" i]') || areaKind(control) !== kind) continue;
+      const ids = (control.getAttribute('aria-controls') || '').split(/\s+/).filter(Boolean);
+      try {
+        const raw = control.getAttribute('href');
+        if (raw) { const u = new URL(raw, location.href); if (u.origin === location.origin && u.pathname === location.pathname && u.search === location.search && u.hash) ids.push(decodeURIComponent(u.hash.slice(1))); }
+      } catch { /* Invalid fragments are diagnostic candidates only. */ }
+      if (control.id) for (const pane of query(['[role="tabpanel"][aria-labelledby]'])) if ((pane.getAttribute('aria-labelledby') || '').split(/\s+/).includes(control.id)) ids.push(pane.id);
+      for (const id of ids) {
+        const pane = document.getElementById(id);
+        // An unselected tab can link an already displayed section, but a hidden pane is never read.
+        if (pane && !/^(BODY|HTML)$/.test(pane.tagName) && rendered(pane) && !foreignProduct(pane) && !pane.contains(control) && !pane.querySelector('input[type="password"],textarea,[contenteditable="true"]')) result.push(pane);
+      }
+    }
+    return [...new Set(result)];
+  }
   function reviewScopes() {
-    const scopes: Element[] = [];
+    const scopes: Element[] = linkedAreas('review');
     for (const tab of query(['[role="tab"][aria-selected="true"]','[aria-selected="true"][aria-controls]'])) {
       if (!displayed(tab) || foreignProduct(tab) || !/^(리뷰|구매평|상품평)/.test(clean((tab as HTMLElement).innerText || ''))) continue;
       const id = tab.getAttribute('aria-controls'), pane = id && document.getElementById(id);
@@ -188,13 +213,13 @@ export function collectRenderedProductPage() {
     for (const pane of query(['#REVIEW','[data-shp-area="review"]','.sdp-review'])) {
       if (!onScreen(pane)) continue;
       const heading = Array.from(pane.querySelectorAll('h2,h3,[role="heading"]')).some(e => /^(전체\s*)?(리뷰|구매평|상품평)/.test(text(e, 60)));
-      const sorting = Array.from(pane.querySelectorAll('button,select,[role="button"]')).some(e => onScreen(e) && /최신순|추천순|평점.*순|리뷰\s*정렬/.test(text(e, 60) + (e.getAttribute('aria-label') || '')));
+      const sorting = Array.from(pane.querySelectorAll('button,a,select,[role="button"]')).some(e => onScreen(e) && /최신순|추천순|랭킹순|평점.*순|리뷰\s*정렬/.test(text(e, 60) + (e.getAttribute('aria-label') || '')));
       if (heading && sorting) scopes.push(pane);
     }
     for (const heading of query(['h2','h3','[role="heading"]'])) {
       if (!onScreen(heading) || !/^(전체\s*)?(리뷰|구매평|상품평)(?:\s|\d|\(|$)/.test(text(heading, 60))) continue;
       for (let p = heading.parentElement, depth = 0; p && !/^(BODY|HTML)$/.test(p.tagName) && depth < 4; p = p.parentElement, depth++) {
-        const sorting = Array.from(p.querySelectorAll('button,select,[role="button"]')).some(e => onScreen(e) && /최신순|추천순|평점.*순|리뷰\s*정렬/.test(text(e, 60) + (e.getAttribute('aria-label') || '')));
+        const sorting = Array.from(p.querySelectorAll('button,a,select,[role="button"]')).some(e => onScreen(e) && /최신순|추천순|랭킹순|평점.*순|리뷰\s*정렬/.test(text(e, 60) + (e.getAttribute('aria-label') || '')));
         if (sorting) { scopes.push(p); break; }
       }
     }
@@ -244,14 +269,14 @@ export function collectRenderedProductPage() {
       try { const a = new URL(imageMeta, location.href), b = new URL((e as HTMLImageElement).currentSrc || (e as HTMLImageElement).src); return a.hostname === b.hostname && a.pathname === b.pathname; } catch { return false; }
     }) : [];
     let images = dedupImages([...query(adapter.images), ...matchingImages].map(e => imageUrl(e)).filter(Boolean));
-    const detailRoots = query(adapter.details);
+    const detailRoots = [...new Set([...query(adapter.details).filter(rendered), ...linkedAreas('detail')])];
     // An explicitly labelled detail tab is also a product scope; no arbitrary body text fallback.
     for (const pane of query(['[role="tabpanel"][aria-labelledby]'])) {
       const label = document.getElementById(pane.getAttribute("aria-labelledby") || "");
-      if (label && /^(상세정보|상품정보|상품상세|제품상세)$/.test(text(label))) detailRoots.push(pane);
+      if (label && displayed(label) && areaKind(label) === 'detail' && rendered(pane)) detailRoots.push(pane);
     }
     for (const heading of query(['h2','h3','[role="heading"]'])) {
-      if (!/^(상품\s*상세(?:정보|설명)?|상세\s*(정보|설명)|제품\s*상세)$/.test(text(heading, 40))) continue;
+      if (!/^(상품\s*상세(?:정보|설명)?|상품\s*정보|상세\s*(정보|설명)|제품\s*상세)$/.test(text(heading, 40))) continue;
       const section = heading.closest('section,article,[role="tabpanel"]') || heading.parentElement;
       if (section && !/^(BODY|HTML)$/.test(section.tagName) && section.querySelectorAll('h1,h2,h3').length <= 1) detailRoots.push(section);
     }
@@ -269,9 +294,9 @@ export function collectRenderedProductPage() {
     const assets: Asset[] = [];
     if (primary) assets.push({ url: imageUrl(primary), role: 'primary', confidence: region?.corroborated && (region.root.contains(primary) || matchingImages.includes(primary)) ? 'corroborated' : 'candidate' });
     let galleryRoot = primary?.parentElement || null;
-    for (let depth = 0; galleryRoot && galleryRoot.querySelectorAll('img').length < 2 && depth < 2; depth++) {
+    for (let depth = 0; galleryRoot && galleryRoot.querySelectorAll('img').length < 2 && depth < 6; depth++) {
       const parent = galleryRoot.parentElement;
-      if (!parent || /^(BODY|HTML)$/.test(parent.tagName) || (region && parent.contains(region.heading))) break;
+      if (!parent || /^(BODY|HTML)$/.test(parent.tagName) || (region && parent.contains(region.heading)) || parent.querySelector('h1,h2,h3,h4,[role="heading"],aside,nav,[class*="recommend" i],[class*="related" i]') || [...detailRoots, ...reviewRoots].some(r => parent.contains(r) || r.contains(parent)) || Array.from(parent.querySelectorAll('img')).some(e => foreignProduct(e) || adLinkedImage(e))) break;
       galleryRoot = parent;
     }
     const extras = [...gallery, ...(galleryRoot ? Array.from(galleryRoot.querySelectorAll('img')).filter(e => usableImages.includes(e)) : [])];
@@ -315,6 +340,16 @@ export function collectRenderedProductPage() {
     const allScreenImages = query(['img']).filter(e => onScreen(e) && (e as HTMLImageElement).complete && (e as HTMLImageElement).naturalWidth > 0);
     const frames = query(['iframe']).filter(onScreen);
     const readableFrames = frames.filter(e => { try { return !!(e as HTMLIFrameElement).contentDocument; } catch { return false; } }).length;
+    const structureTag = (e: Element) => /^(DIV|SECTION|ARTICLE|MAIN|UL|OL|LI|FIGURE|PICTURE|A|BUTTON|SPAN|P|H[1-6]|NAV|IMG|BODY|HTML)$/.test(e.tagName) ? e.tagName : 'OTHER';
+    const structure = {
+      version: 1,
+      images: allScreenImages.slice(0, 24).map(img => {
+        const ancestors = []; let node: Element | null = img.parentElement;
+        for (let depth = 0; node && depth < 7; depth++, node = node.parentElement) ancestors.push({ tag: structureTag(node), images: Math.min(node.querySelectorAll('img').length, 1000), headings: Math.min(node.querySelectorAll('h1,h2,h3,h4,[role="heading"]').length, 1000), detail: detailRoots.some(r => r === node || r.contains(node!)), review: reviewRoots.some(r => r === node || r.contains(node!)) });
+        return { supported: !!imageUrl(img), accepted: images.includes(imageUrl(img)), foreign: foreignProduct(img) || adLinkedImage(img), ancestors };
+      }),
+      controls: query(['a[href]','button','[role="tab"]','[aria-controls]','h1','h2','h3','h4','[role="heading"]']).filter(e => displayed(e) && areaKind(e)).slice(0, 30).map(e => ({ kind: areaKind(e), tag: structureTag(e), selected: e.getAttribute('aria-selected') === 'true', controls: !!e.getAttribute('aria-controls'), fragment: (e.getAttribute('href') || '').includes('#'), onScreen: onScreen(e), ancestorTags: [e.parentElement, e.parentElement?.parentElement, e.parentElement?.parentElement?.parentElement].filter((n): n is HTMLElement => !!n).map(structureTag) })),
+    };
     const description = detailRoots.map(e => text(e)).find(Boolean) || "";
     let legacyPrice = '';
     for (const e of query(adapter.price).filter(rendered)) { const p = prices(e.parentElement || e); if (p.value) { legacyPrice = p.value; break; } }
@@ -323,7 +358,7 @@ export function collectRenderedProductPage() {
     const amount = usableMeta ? meta("product:price:amount") || meta("og:price:amount") : "";
     const priceMeta = /^\d+(?:\.\d+)?$/.test(amount) ? `${amount}${/^(KRW|원)$/i.test(meta("product:price:currency") || meta("og:price:currency")) ? "원" : " (통화·옵션 확인 필요)"}` : "";
     const diagnostics = {
-      automaticAssessmentRecorded: true, collectorVersion: version, platform: naver ? "naver" : "coupang", productId: location.pathname.split('/').filter(Boolean).pop() || "",
+      structure, automaticAssessmentRecorded: true, collectorVersion: version, platform: naver ? "naver" : "coupang", productId: location.pathname.split('/').filter(Boolean).pop() || "",
       pageState: document.readyState, topFrame: window.top === window, metadataIdentity: identity, blockedPage: blocked,
       counts: { metadataTags: query(['head meta[property^="og:"]', 'head meta[property^="product:"]']).length, titleMatches: query(adapter.title).length, priceMatches: query(adapter.price).length, detailRoots: detailRoots.length, reviewMatches: query(adapter.reviews).length, visibleReviews: reviews.length, visibleImages: allScreenImages.length, productImages: images.length, frames: frames.length, readableFrames, headingCandidates: 0, purchaseControls: 0, productRegions: 0, ambiguousRegions: 0, moneyCandidates: 0, excludedBenefitPrices: 0, ambiguousPrices: 0, supportedVisibleImages: 0, imageHostRejected: 0, imageScopeRejected: 0, primaryImages: 0, additionalImages: 0, detailImages: 0, reviewTabOpen: 0, autoTitle: 0, autoPrice: 0, autoPrimaryImage: 0, rawHeadingElements: 0, visibleCurrencyNodes: 0 },
       fields: [] as { name: Field; method: Method; path: Path; confidence: Confidence }[],
@@ -400,10 +435,11 @@ export function collectRenderedProductPage() {
     lines.push("문서 complete도 동적 상품 영역의 준비 완료를 보장하지 않습니다. 상품이 보인 후 다시 읽으세요.");
     lines.push(`자동 추출 당시(직접 선택 제외): 상품명 ${c.autoTitle ? '찾음' : '미확인'}, 가격 ${c.autoPrice ? '찾음' : '미확인'}, 대표 이미지 ${c.autoPrimaryImage ? '찾음' : '미확인'}`);
     lines.push(`표시 제목 요소 ${c.rawHeadingElements}, 통화 표시 요소 ${c.visibleCurrencyNodes}. 제목 후보 ${c.headingCandidates}, 구매 버튼 ${c.purchaseControls}, 상품 영역 ${c.productRegions}, 영역 충돌 ${c.ambiguousRegions}, 판매가 후보 ${c.moneyCandidates}, 혜택 금액 제외 ${c.excludedBenefitPrices}`);
+    lines.push(`구조 진단: 이미지 조상 ${d.structure.images.length}개 / 상세·리뷰 표지 ${d.structure.controls.length}개. 텍스트·클래스명·주소·작성자 정보는 저장하지 않습니다.`);
     lines.push(`대표 ${c.primaryImages} / 추가 ${c.additionalImages} / 상세 ${c.detailImages}, 이미지 호스트 제외 ${c.imageHostRejected} / 상품 범위 제외 ${c.imageScopeRejected}. 리뷰 탭 ${c.reviewTabOpen ? '열림 단서 있음' : '열림 미확인'}. 리뷰 수와 본문 수는 별개입니다.`);
     if (c.ambiguousRegions || c.ambiguousPrices) lines.push('여러 상품 영역 또는 판매가 후보가 충돌해 자동 확정하지 않았습니다. 단일 상품 화면과 진단을 확인하세요.');
     if (!data.title && !data.price) lines.push("상품명·가격 영역을 찾지 못했습니다. 상품 영역 단서가 부족하거나 구조/렌더링이 다를 수 있습니다. 자동 결과는 미확인입니다. 진단 파일로 자동 탐색 실패를 확인하세요. 직접 선택은 보조 수단이며 자동 성공이 아닙니다.");
-    if (!data.description) lines.push("상세정보를 직접 펼친 뒤 다시 읽으세요. 설명이 이미지로만 제공되면 텍스트는 자동 추출하지 않습니다.");
+    if (!data.description) lines.push("상세정보를 직접 펼친 뒤 다시 읽으세요. 설명이 이미지로만 제공되면 텍스트는 자동 추출하지 않습니다. 펼쳤는데도 상세 영역이 0이면 구조 진단 파일을 전달해 주세요.");
     if (!data.images.length) lines.push("현재 화면의 상품 이미지가 없거나 아직 로드되지 않았거나 이미지 영역·호스트가 미지원입니다. 이미지를 화면에 보이게 한 뒤 다시 읽거나 '화면 이미지 직접 선택'을 이용하세요.");
     if (!data.reviews.length) lines.push("구매평 본문을 찾지 못했습니다. 구매평 탭을 열고 본문이 화면에 보이게 하세요. 별도 영역 구조라면 아래 글자 직접 선택을 이용하세요. 실제 구매 인증 여부는 확인하지 않습니다.");
     if (c.frames) lines.push("iframe이 보입니다. 다른 출처이거나 로딩 중인 iframe 내부는 읽지 않습니다. iframe 존재가 상품 정보가 그 안에 있다는 증거는 아닙니다.");

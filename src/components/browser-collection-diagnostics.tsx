@@ -6,7 +6,7 @@ const paths = { legacy_selector: "기존 상품 요소", metadata: "공개 메�
 const confidence = { corroborated: "복수 단서 일치 · 원본 확인 필요", candidate: "후보 · 원본 비교 필요", user_provided: "사용자 보완 · 자동 수집 아님", unconfirmed: "미확인" };
 
 export function BrowserCollectionDiagnosticsView({ diagnostics: d }: { diagnostics?: BrowserCollectionDiagnostics }) {
-  if (!d) return <p className="rounded border p-3 text-sm">이 자료에는 새 진단 정보가 없습니다. 기존 즐겨찾기를 삭제하고 버전 2026-10-28.3 버튼을 다시 등록해 주세요. 이전 파일도 직접 보완해 사용할 수 있습니다.</p>;
+  if (!d) return <p className="rounded border p-3 text-sm">이 자료에는 새 진단 정보가 없습니다. 기존 즐겨찾기를 삭제하고 버전 2026-10-28.4 버튼을 다시 등록해 주세요. 이전 파일도 직접 보완해 사용할 수 있습니다.</p>;
   return <section className="space-y-2 rounded border p-4">
     <h3 className="font-semibold">페이지 수집 진단 · {d.collectorVersion}</h3>
     <p className="text-sm">{d.platform === "naver" ? "네이버" : "쿠팡"} 상품 {d.productId} · 문서 {d.pageState} · 최상위 탭 {d.topFrame ? "예" : "아니요"}</p>
@@ -16,6 +16,7 @@ export function BrowserCollectionDiagnosticsView({ diagnostics: d }: { diagnosti
     <p className="text-sm">표시 제목 요소 {d.counts.rawHeadingElements} / 통화 표시 요소 {d.counts.visibleCurrencyNodes} (중복 포함 관찰값)</p>
     <p className="text-sm">제목 후보 {d.counts.headingCandidates} / 구매 버튼 {d.counts.purchaseControls} / 상품 영역 {d.counts.productRegions} / 영역 충돌 {d.counts.ambiguousRegions} / 혜택 금액 제외 {d.counts.excludedBenefitPrices}</p>
     <p className="text-sm">대표 {d.counts.primaryImages} / 추가 {d.counts.additionalImages} / 상세 {d.counts.detailImages} · 이미지 호스트 제외 {d.counts.imageHostRejected} / 범위 제외 {d.counts.imageScopeRejected} · 리뷰 탭 {d.counts.reviewTabOpen ? "열림 단서 있음" : "열림 미확인"}</p>
+    {d.structure && <details className="text-sm"><summary>개인정보 없는 DOM 구조 진단</summary><p>화면 이미지 {d.structure.images.length}개의 조상 태그·이미지 수, 상세/리뷰 표지 {d.structure.controls.length}개의 연결 상태만 기록합니다. 원문·클래스명·작성자·주소는 포함하지 않습니다.</p><pre className="max-h-64 overflow-auto">{JSON.stringify(d.structure, null, 2)}</pre></details>}
     <ul className="list-disc pl-5 text-sm">{d.fields.map(f => <li key={f.name}>{names[f.name]}: {methods[f.method]} · {paths[f.path] || "경로 미확인"} · {confidence[f.confidence] || "미확인"}</li>)}</ul>
     {d.pageState !== "complete" && <p>페이지가 로딩 중이었습니다. 로딩 후 북마클릿에서 현재 페이지를 다시 읽으세요.</p>}
     <p className="text-sm">문서 complete도 동적 상품 영역의 준비 완료를 보장하지 않습니다. 상품 내용이 보인 뒤 다시 읽으세요.</p>
@@ -23,7 +24,7 @@ export function BrowserCollectionDiagnosticsView({ diagnostics: d }: { diagnosti
     {d.metadataIdentity === "mismatch" && <p>페이지 주소와 메타데이터 상품이 다릅니다. 페이지 전환이 끝난 뒤 다시 읽으세요.</p>}
     {!d.counts.autoTitle && !d.counts.autoPrice && <p>상품 영역 단서가 부족하거나 구조·렌더링 차이가 있을 수 있습니다. 진단 파일로 자동 탐색 실패를 확인하세요. 직접 선택은 보조 수단이며 자동 수집 성공을 뜻하지 않습니다.</p>}
     {!!(d.counts.ambiguousRegions || d.counts.ambiguousPrices) && <p>복수 상품·판매가 후보가 충돌해 자동 확정하지 않았습니다.</p>}
-    {!d.counts.detailRoots && <p>상세정보를 펼치고 다시 읽으세요. 설명이 이미지 안에만 있으면 텍스트 추출은 지원하지 않습니다.</p>}
+    {!d.counts.detailRoots && <p>상세정보를 펼치고 다시 읽으세요. 이미 펼쳤는데도 0이면 새 구조 진단 파일을 전달해 주세요. 설명이 이미지 안에만 있으면 텍스트 추출은 지원하지 않습니다.</p>}
     {!d.counts.productImages && <p>상품 사진을 화면에 보이게 한 뒤 다시 읽거나 화면 이미지 직접 선택을 이용하세요. 미지원 호스트·배경 이미지·iframe 사진은 권한 있는 파일을 직접 업로드하세요.</p>}
     {!d.counts.visibleReviews && <p>구매평 탭에서 본문이 보이도록 펼치세요. 여전히 수집되지 않으면 본문 하나만 직접 선택하세요. 작성자·안내 문구는 제외해야 합니다.</p>}
     {!!d.counts.frames && <p>iframe 존재만으로 상품 자료 위치를 확정할 수 없습니다. 다른 출처 또는 아직 로드되지 않은 iframe 내부는 읽지 않습니다.</p>}

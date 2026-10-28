@@ -7,7 +7,28 @@ export type BrowserConfidence = "corroborated" | "candidate" | "user_provided" |
 export interface BrowserImageAsset { url: string; role: "primary" | "additional" | "detail" | "unclassified"; confidence: BrowserConfidence }
 export type BrowserField = typeof BROWSER_FIELDS[number];
 export type BrowserFieldMethod = "visible_dom" | "public_metadata" | "manual_selection" | "user_edit" | "unconfirmed";
+const STRUCTURE_TAGS = ['DIV','SECTION','ARTICLE','MAIN','UL','OL','LI','FIGURE','PICTURE','A','BUTTON','SPAN','P','H1','H2','H3','H4','H5','H6','NAV','IMG','BODY','HTML','OTHER'] as const;
+type StructureTag = typeof STRUCTURE_TAGS[number];
+interface BrowserStructure {
+  version: 1;
+  images: { supported: boolean; accepted: boolean; foreign: boolean; ancestors: { tag: StructureTag; images: number; headings: number; detail: boolean; review: boolean }[] }[];
+  controls: { kind: 'detail' | 'review'; tag: StructureTag; selected: boolean; controls: boolean; fragment: boolean; onScreen: boolean; ancestorTags: StructureTag[] }[];
+}
+function parseStructure(raw: unknown): BrowserStructure | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const b = raw as Record<string, unknown>;
+  if (b.version !== 1) return undefined;
+  const object = (v: unknown): Record<string, unknown> => v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {};
+  const list = (v: unknown, limit: number) => Array.isArray(v) ? v.slice(0, limit).map(object) : [];
+  const tag = (v: unknown): StructureTag => STRUCTURE_TAGS.includes(v as StructureTag) ? v as StructureTag : 'OTHER';
+  const count = (v: unknown) => typeof v === 'number' && Number.isInteger(v) && v >= 0 ? Math.min(v, 1000) : 0;
+  return { version: 1,
+    images: list(b.images, 24).map(v => ({ supported: v.supported === true, accepted: v.accepted === true, foreign: v.foreign === true, ancestors: list(v.ancestors, 7).map(a => ({ tag: tag(a.tag), images: count(a.images), headings: count(a.headings), detail: a.detail === true, review: a.review === true })) })),
+    controls: list(b.controls, 30).filter(v => v.kind === 'detail' || v.kind === 'review').map(v => ({ kind: v.kind as 'detail' | 'review', tag: tag(v.tag), selected: v.selected === true, controls: v.controls === true, fragment: v.fragment === true, onScreen: v.onScreen === true, ancestorTags: Array.isArray(v.ancestorTags) ? v.ancestorTags.slice(0, 3).map(tag) : [] })),
+  };
+}
 export interface BrowserCollectionDiagnostics {
+  structure?: BrowserStructure;
   collectorVersion: string;
   platform: "naver" | "coupang";
   productId: string;
@@ -30,6 +51,7 @@ export function parseBrowserDiagnostics(input: unknown): BrowserCollectionDiagno
   const methods = new Set(["visible_dom", "public_metadata", "manual_selection", "user_edit", "unconfirmed"]);
   const sourceFields = Array.isArray(b.fields) ? b.fields.slice(0, 20) : [];
   return {
+    structure: parseStructure(b.structure),
     automaticAssessmentRecorded: b.automaticAssessmentRecorded !== false && ["autoTitle", "autoPrice", "autoPrimaryImage"].every(k => Object.hasOwn(counts, k)),
     collectorVersion: b.collectorVersion, platform: b.platform as "naver" | "coupang", productId: b.productId,
     pageState: ["loading", "interactive", "complete"].includes(String(b.pageState)) ? b.pageState as BrowserCollectionDiagnostics["pageState"] : "loading",

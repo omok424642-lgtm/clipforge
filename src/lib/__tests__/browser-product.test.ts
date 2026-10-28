@@ -203,7 +203,7 @@ describe("diagnosing unsupported live-page structures without private state", ()
     const p = page(liveUrl, publicHead);
     const safe = parseBrowserDiagnostics({ ...snapshot(p).diagnostics, html: '<div>개인정보</div>', cookie: 'secret', sourceUrl: 'https://private/token', counts: { ...snapshot(p).diagnostics.counts, private: 'secret', frames: -5 } });
     expect(JSON.stringify(safe)).not.toMatch(/개인정보|secret|private|token/); expect(safe!.counts.frames).toBe(0);
-    const material = parseBrowserProduct(snapshot(p)); expect(material.diagnostics!.collectorVersion).toBe('2026-10-28.3');
+    const material = parseBrowserProduct(snapshot(p)); expect(material.diagnostics!.collectorVersion).toBe('2026-10-28.4');
     expect(parseBrowserDiagnostics({ collectorVersion: 'injected-private-text' })).toBeUndefined(); p.dom.window.close();
   });
   it("does not attach diagnostics from a different product to a material snapshot", () => {
@@ -320,5 +320,43 @@ describe("automatic product-region extraction, with zero manual selection", () =
     const url = sample().images[0];
     const material = parseBrowserProduct({ ...sample(), imageAssets: [{url,role:'primary',confidence:'verified'},{url:'https://evil.test/private.jpg',role:'detail',confidence:'corroborated'}] });
     expect(material.imageAssets).toEqual([{url,role:'primary',confidence:'unconfirmed'}]);
+  });
+});
+
+describe('brandstore material scope relationships (synthetic, not live validation)', () => {
+  const url = 'https://brand.naver.com/fixture/products/556677';
+  it('follows visible same-page detail and review links without relying on CSS names or selected ARIA tabs', () => {
+    const body = '이 제품을 출근할 때 매일 사용했는데 손에 잡기 편하고 세척하기도 편했습니다.';
+    const p = page(url, automaticFixture() + `<nav><a href="#spec-pane">상품정보</a><a href="#feedback-pane">리뷰(350)</a></nav>
+      <div id="spec-pane"><p>공개 상품 설명과 소재 정보입니다.</p><img src="https://shop-phinf.pstatic.net/detail-long.jpg" data-height="400"></div>
+      <div id="feedback-pane"><ul><li><span>작성자_개인정보</span><time>2026.10.20</time><span aria-label="평점 4점"></span><p>${body}</p><img data-width="700" data-height="400" src="https://shop-phinf.pstatic.net/customer.jpg"></li></ul></div>
+      <aside><a href="#ad">상품정보</a><img src="https://shop-phinf.pstatic.net/ad.jpg"></aside>`);
+    const s = snapshot(p);
+    expect(s.title).toBe('테스트 무선 전기포트'); expect(s.price).toBe('53,700원');
+    expect(s.imageAssets.find((v: {role: string}) => v.role === 'primary').url).toContain('/hero.jpg');
+    expect(s.imageAssets.find((v: {role: string}) => v.role === 'detail').url).toContain('/detail-long.jpg');
+    expect(s.description).toContain('공개 상품 설명'); expect(s.reviews).toEqual([body]);
+    expect(s.diagnostics.counts.reviewTabOpen).toBe(1);
+    expect(s.images.join(' ')).not.toMatch(/customer|ad.jpg/);
+    expect(JSON.stringify(s.diagnostics)).not.toMatch(/작성자|소재|편했습니다|https:|spec-pane|feedback-pane|shop-phinf/);
+    expect(p.fetch).not.toHaveBeenCalled(); p.dom.window.close();
+  });
+  it('never treats hidden panels, other-page fragments or a link wrapping the whole page as material scopes', () => {
+    const p = page(url, automaticFixture() + `<nav><a href="#hidden">상품정보</a><a href="/other/products/44#foreign">리뷰(30)</a></nav><div id="hidden" hidden><p>숨긴 상세 자료</p><img src="https://shop-phinf.pstatic.net/hidden.jpg"></div><div id="foreign"><p>다른 상품 자료</p></div>`);
+    const s = snapshot(p); expect(s.description).toBe(''); expect(s.reviews).toEqual([]); expect(s.diagnostics.counts.reviewTabOpen).toBe(0); expect(s.images.join()).not.toContain('hidden'); p.dom.window.close();
+  });
+  it('finds additional gallery images across presentation wrappers but stops before the product heading and recommendations', () => {
+    const html = automaticFixture().replace('<img data-width="60"', '</div></div></div><img data-width="60"').replace('<div class="opaque-gallery">', '<div class="opaque-gallery"><div><div><div>');
+    const p = page(url, html + `<div><h3>추천 상품</h3><a href="https://brand.naver.com/fixture/products/999"><img src="https://shop-phinf.pstatic.net/foreign.jpg"></a></div>`);
+    const s = snapshot(p); expect(s.imageAssets.find((v: {role: string}) => v.role === 'additional').url).toContain('/side.jpg'); expect(s.images.join()).not.toContain('foreign'); p.dom.window.close();
+  });
+  it('keeps unlinked unrecognized material images unknown and exports only bounded structural evidence', () => {
+    const p = page(url, automaticFixture() + `<div id="private-id"><img src="https://shop-phinf.pstatic.net/unresolved.jpg"></div><button>상품정보</button><button>리뷰(30)</button>`);
+    const s = snapshot(p); expect(s.diagnostics.counts.imageScopeRejected).toBeGreaterThan(0); expect(s.images.join()).not.toContain('unresolved');
+    expect(s.diagnostics.structure.images.length).toBeGreaterThan(0); expect(s.diagnostics.structure.controls.length).toBeGreaterThanOrEqual(2);
+    const value = parseBrowserDiagnostics({ ...s.diagnostics, structure: { ...s.diagnostics.structure, cookie: 'secret', images: Array(100).fill({ supported: true, url: 'secret', ancestors: Array(10).fill({ tag: 'private-user-name', images: 999999, headings: -1, text: 'secret' }) }), controls: [{ kind: 'review', tag: 'A', ancestorTags: ['private-user-name'], text: 'secret' },{kind:'secret'}] } })!;
+    expect(value.structure!.images).toHaveLength(24); expect(value.structure!.images[0].ancestors).toHaveLength(7); expect(value.structure!.images[0].ancestors[0]).toEqual({tag:'OTHER',images:1000,headings:0,detail:false,review:false}); expect(JSON.stringify(value)).not.toMatch(/secret|private-user-name|private-id|unresolved/);
+    expect(parseBrowserDiagnostics({...s.diagnostics,structure:{version:22}})!.structure).toBeUndefined();
+    p.dom.window.close();
   });
 });

@@ -1,0 +1,2 @@
+# Keep CRLF bytes in GitHub ZIP downloads as well as Windows checkouts.
+*.cmd -text whitespace=cr-at-eol

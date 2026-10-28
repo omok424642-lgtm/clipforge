@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useProductLibraryStore } from "@/lib/stores/product-library-store";
 import { missingCommerceFields, type CommerceProductDraft } from "@/lib/commerce-product";
 
-const methods = { manual: "직접 입력 필요", naver_search_api: "종료된 네이버 검색 API — 현재 사용 불가", coupang_partners_api: "쿠팡 파트너스 API", public_metadata: "공개 상품 정보" };
+const methods = { manual: "직접 입력 필요", naver_search_api: "종료된 네이버 검색 API — 현재 사용 불가", coupang_partners_api: "쿠팡 파트너스 API", public_metadata: "공개 상품 정보", browser_page: "사용자가 확인한 브라우저 페이지 자료" };
 
 export default function CommerceImportPage() {
   const [url, setUrl] = useState("");
@@ -84,6 +84,7 @@ export default function CommerceImportPage() {
   return <main lang="ko" className="mx-auto max-w-4xl space-y-6 px-5 py-10">
     <div><Link href="/products" className="text-sm underline">상품 보관함으로</Link><h1 className="mt-3 text-2xl font-bold">네이버·쿠팡 상품 가져오기</h1>
       <p className="mt-2 text-muted-foreground">상품 정보를 확인하고 보완해 저장합니다. 이 단계에서는 영상 제작·업로드·쇼핑커넥트 태그 부착을 실행하지 않습니다.</p></div>
+    <Link href="/products/browser" className="block underline">즐겨찾기 ‘상품 가져오기’ 버튼 설치 · 자료 파일 열기</Link>
     <form onSubmit={analyze} className="space-y-4 rounded-xl border p-5">
       <label className="block space-y-2"><span>상품 또는 제휴 링크</span><Input type="url" required maxLength={4096} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="네이버 쇼핑커넥트·스마트스토어 또는 쿠팡 링크" disabled={busy} /></label>
       <label className="block space-y-2"><span>실제 상품 링크 (선택)</span><Input type="url" maxLength={4096} value={productUrl} onChange={(e) => setProductUrl(e.target.value)} placeholder="제휴 링크를 열어 확인한 같은 상품의 주소" disabled={busy} /><span className="block text-xs text-muted-foreground">제휴 원본은 그대로 보존됩니다. 제휴 링크와 같은 상품인지 직접 확인해 주세요.</span></label>
@@ -100,6 +101,14 @@ export default function CommerceImportPage() {
         {draft.link.itemId && <p>쿠팡 옵션 식별 번호: {draft.link.itemId} {draft.link.vendorItemId && `/ 판매 옵션: ${draft.link.vendorItemId}`}</p>}
       </div>
       <ul className="list-disc space-y-2 pl-5 text-sm text-muted-foreground">{draft.warnings.map((warning, i) => <li key={i}>{warning}</li>)}</ul>
+      {draft.browserMaterials && <section className="space-y-2 rounded-lg border p-3">
+        <h3 className="font-semibold">브라우저에서 확인한 원본 자료 (검증·AI 분석 전)</h3>
+        <p>브랜드: {draft.browserMaterials.brand || "미확인"} · 평점: {draft.browserMaterials.rating || "미확인"}</p>
+        <p>상품 소개 영상: {draft.browserMaterials.videoPresent ? "페이지에 영상 요소 있음 · 재생·다운로드·편집 권한 미확인" : "미확인"}</p>
+        <p>이 범위만 수집: {draft.browserMaterials.scope}. 다른 옵션에서도 동일한 사양·리뷰인지는 미확인입니다.</p>
+        <details><summary>표시된 구매평 {draft.browserMaterials.reviews.length}개 · 광고 전재 금지</summary>{draft.browserMaterials.reviews.map((r, i) => <p className="my-2 whitespace-pre-wrap" key={i}>{r}</p>)}</details>
+        <p className="text-sm">원본 자료를 수정하려면 자료 파일을 다시 열어 내용을 수정하고 새로 가져오세요. 아래 상품명·설명·옵션·특징·이미지는 저장 전에 수정할 수 있습니다. AI 분석과 영상 다운로드는 이 단계에서 실행하지 않습니다.</p>
+      </section>}
       <p className="text-sm">아래 내용은 모두 수정할 수 있습니다. 원본 판매 페이지와 가격·선택 옵션을 비교하고, 확인되지 않은 효능이나 특징은 추가하지 마세요.</p>
       <fieldset disabled={busy} className="space-y-4">
         <label className="block space-y-2"><span>상품명 *</span><Input required maxLength={300} value={draft.title} onChange={(e) => patch({ title: e.target.value })} /></label>

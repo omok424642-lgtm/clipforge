@@ -1,6 +1,6 @@
 /** Shared, client-safe contract for reviewed Korean commerce imports. No video side effects. */
 export type CommercePlatform = "naver" | "coupang";
-export type CollectionMethod = "naver_search_api" | "coupang_partners_api" | "public_metadata" | "manual";
+export type CollectionMethod = "naver_search_api" | "coupang_partners_api" | "public_metadata" | "manual" | "browser_page";
 export interface CommerceLink {
   platform: CommercePlatform;
   originalUrl: string;
@@ -28,6 +28,8 @@ export interface CommerceProductDraft {
   description: string;
   images: CommerceImage[];
   warnings: string[];
+  /** Immutable single-page source; user edits live in the reviewed product fields. No media license is implied. */
+  browserMaterials?: import("./browser-product").BrowserProductMaterials;
   disclosure: { enabled: boolean; text: string; placement: "video_overlay" };
   review?: {
     confirmedAt: string;

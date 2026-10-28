@@ -5,6 +5,7 @@ import { collectCommerceProduct } from "@/lib/commerce-collection";
 import { readCommerceDraft, saveCommerceDraft, validCommerceDraftId } from "@/lib/commerce-storage";
 import { reviewCommerceProduct } from "@/lib/commerce-review";
 import { retainCommerceImages } from "@/lib/commerce-images";
+import { parseBrowserProduct } from "@/lib/browser-product";
 
 export const runtime = "nodejs";
 const response = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
@@ -21,12 +22,38 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   let body: Record<string, unknown>;
   try {
-    if (Number(req.headers.get("content-length")) > 64000) return response({ error: "요청이 너무 큽니다." }, 413);
+    if (Number(req.headers.get("content-length")) > 200000) return response({ error: "요청이 너무 큽니다." }, 413);
     const raw = await req.text();
-    if (raw.length > 64000) return response({ error: "요청이 너무 큽니다." }, 413);
+    if (raw.length > 200000) return response({ error: "요청이 너무 큽니다." }, 413);
     body = JSON.parse(raw);
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error();
   } catch { return response({ error: "입력 형식이 올바르지 않습니다." }, 400); }
+  if (body.action === "browser_import") {
+    if (body.confirmed !== true) return response({ error: "자료와 개인정보 제거를 먼저 확인해 주세요." }, 400);
+    try {
+      const material = parseBrowserProduct(body.material);
+      const link = classifyCommerceLink(material.sourceUrl);
+      if (typeof body.affiliateUrl === "string" && body.affiliateUrl.trim()) {
+        const affiliate = classifyCommerceLink(body.affiliateUrl);
+        const u = new URL(affiliate.originalUrl);
+        if ([...u.searchParams.keys()].some(k => /token|auth|session|password|credential|signature/i.test(k))) throw new Error("인증 정보가 포함된 제휴 주소는 보존할 수 없습니다.");
+        if (affiliate.platform !== link.platform || (affiliate.productId && !sameCommerceProduct(link, affiliate.originalUrl))) throw new Error("같은 상품의 제휴 링크인지 확인해 주세요.");
+        link.originalUrl = affiliate.originalUrl;
+        link.kind = affiliate.kind;
+      }
+      const draft: CommerceProductDraft = {
+        id: randomUUID(), link, resolvedUrl: material.sourceUrl, collectedAt: material.collectedAt,
+        method: "browser_page", status: "needs_review", title: material.title, price: material.price,
+        options: material.options, features: material.specifications, description: material.description,
+        images: material.images.map(url => ({ url, sourceUrl: material.sourceUrl, provenance: "browser_page" })),
+        browserMaterials: material,
+        warnings: ["사용자가 제공한 현재 페이지 자료입니다. 상품·선택 옵션·리뷰 내용의 정확성은 미검증입니다.", "모든 원본 자료의 출처·수집 시각은 아래 상품 주소·수집 시각입니다. 빈 항목은 미확인입니다.", "자료 수집은 광고 재사용·AI 입력 허락이 아닙니다. 이미지는 권한 확인 후 저장하며 영상은 존재 여부만 기록합니다.", "구매평은 표시된 일부 의견입니다. 작성자 정보와 일반 안내 문구가 없는지 확인하세요. 원문을 광고에 전재하지 마세요."],
+        disclosure: { enabled: link.kind === "affiliate_or_share", text: link.platform === "naver" ? NAVER_DISCLOSURE : COUPANG_DISCLOSURE, placement: "video_overlay" },
+      };
+      await saveCommerceDraft(draft);
+      return response({ draft });
+    } catch (e) { return response({ error: e instanceof Error ? e.message : "가져오지 못했습니다." }, 400); }
+  }
   if (body.action === "review") {
     if (!validCommerceDraftId(body.id)) return response({ error: "상품 확인 번호가 필요합니다." }, 400);
     let source: CommerceProductDraft;

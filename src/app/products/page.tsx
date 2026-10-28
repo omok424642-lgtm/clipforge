@@ -329,6 +329,7 @@ export default function ProductsPage() {
             <div className="flex items-center gap-2">
               <Link href="/discover"><Button variant="outline">시즌 상품 발굴</Button></Link>
               <Link href="/products/import"><Button variant="outline">네이버·쿠팡 상품 가져오기</Button></Link>
+              <Link href="/products/browser"><Button variant="outline">즐겨찾기로 상품 가져오기</Button></Link>
               <Button
                 variant="outline"
                 onClick={() => {

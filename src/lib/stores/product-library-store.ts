@@ -1,6 +1,8 @@
 import { createPersistentStorage } from "./persistent-storage";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import type { CommerceProductDraft } from "../commerce-product";
+import type { AffiliateVerification } from "../discovery-products";
 
 // product entry
 export interface ProductItem {
@@ -13,6 +15,9 @@ export interface ProductItem {
   targetAudience?: string;
   videoCount: number;
   createdAt: Date;
+  /** Source links and review metadata only; video generation is unchanged. */
+  commerceImport?: CommerceProductDraft;
+  affiliateVerification?: AffiliateVerification;
 }
 
 // product library state

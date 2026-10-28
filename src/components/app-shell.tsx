@@ -18,6 +18,7 @@ import {
 
 interface NavItem {
   key: string;
+  label?: string;
   href: string;
   icon: string;
   /** Director-mode-only entrance: hidden in beginner mode so creation stays a single path (工作台) */
@@ -31,6 +32,7 @@ const NAV_SECTIONS: { labelKey: string; items: NavItem[] }[] = [
     labelKey: "navSectionCreate",
     items: [
       { key: "navHome", href: "/start", icon: "home" },
+      { key: "navDiscover", label: "상품 발굴", href: "/discover", icon: "scan" },
       { key: "navNew", href: "/project/new", icon: "plus", proOnly: true },
       { key: "navClone", href: "/project/clone", icon: "flame" },
       { key: "navMediaLab", href: "/media-lab", icon: "scan", proOnly: true },
@@ -140,7 +142,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <Link
       key={item.key}
       href={item.href}
-      title={collapsed ? t(item.key) : undefined}
+      title={collapsed ? item.label ?? t(item.key) : undefined}
       className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors ${collapsed ? "justify-center px-0" : ""} ${
         active === item.href
           ? "bg-primary/15 font-medium text-primary"
@@ -148,7 +150,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       }`}
     >
       <NavIcon name={item.icon} />
-      {!collapsed && t(item.key)}
+      {!collapsed && (item.label ?? t(item.key))}
     </Link>
   );
 
@@ -248,7 +250,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 {/* Base UI menu items don't take asChild — navigate via router */}
                 {visibleItems.map((item) => (
                   <DropdownMenuItem key={item.key} onClick={() => router.push(item.href)}>
-                    {t(item.key)}
+                    {item.label ?? t(item.key)}
                   </DropdownMenuItem>
                 ))}
                 <DropdownMenuItem onClick={() => router.push("/settings")}>

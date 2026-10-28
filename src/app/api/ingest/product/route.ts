@@ -47,6 +47,14 @@ export async function POST(req: NextRequest) {
   }
   const createProject = body.createProject !== false;
 
+  // Korean commerce imports must pass the explicit review gate, never the legacy scraper/auto-video chain.
+  const protectedHosts = ["naver.me", "link.naver.com", "shoppingconnect.naver.com", "brandconnect.naver.com", "smartstore.naver.com", "m.smartstore.naver.com", "brand.naver.com", "coupang.com", "www.coupang.com", "m.coupang.com", "link.coupang.com"];
+  try {
+    if (protectedHosts.includes(new URL(url).hostname.toLowerCase())) {
+      return NextResponse.json({ error: "네이버·쿠팡 상품은 상품 가져오기 화면에서 정보를 확인한 뒤 저장해 주세요.", reviewUrl: "/products/import" }, { status: 409 });
+    }
+  } catch { return apiError(req, "无效链接", "Invalid URL"); }
+
   // Fetch HTML (descriptive UA + timeout + size cap)
   let html: string;
   try {

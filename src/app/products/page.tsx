@@ -327,6 +327,8 @@ export default function ProductsPage() {
           </div>
           {!isFormOpen && (
             <div className="flex items-center gap-2">
+              <Link href="/discover"><Button variant="outline">시즌 상품 발굴</Button></Link>
+              <Link href="/products/import"><Button variant="outline">네이버·쿠팡 상품 가져오기</Button></Link>
               <Button
                 variant="outline"
                 onClick={() => {
@@ -744,6 +746,7 @@ export default function ProductsPage() {
                         <h3 className="font-medium text-sm truncate group-hover:text-primary transition-colors">
                           {product.name}
                         </h3>
+                        {product.commerceImport && <Link className="text-xs underline" href={`/products/import?draft=${product.commerceImport.id}&reviewed=1`}>원본 링크·상품 정보·제휴 고지 확인</Link>}
                         <div className="flex items-center justify-between mt-2">
                           {product.price && (
                             <span className="text-xs text-primary font-medium">
